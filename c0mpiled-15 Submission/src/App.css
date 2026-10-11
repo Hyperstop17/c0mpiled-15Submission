@@ -18,7 +18,8 @@
 /* --------------------------------------------------------------------------
    App Shell & Main Layout (Google Workspace Frame)
    -------------------------------------------------------------------------- */
-.cogni-app-root {
+.cogni-app-root,
+.cognidrive-app-root {
   display: flex;
   flex-direction: column;
   width: 100vw;
@@ -30,15 +31,21 @@
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.cogni-body-layout {
+.cogni-body-layout,
+.app-main-layout {
   display: flex;
+  flex-direction: row;
   flex: 1;
   min-height: 0;
+  height: calc(100vh - 64px);
   overflow: hidden;
   position: relative;
 }
 
-.cogni-main-content {
+.cogni-main-content,
+.workspace-content-pane {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   height: calc(100% - 16px);
@@ -46,7 +53,7 @@
   border-radius: 16px;
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  overflow-y: auto;
+  overflow: hidden;
   position: relative;
   box-shadow: var(--shadow-sm);
   transition: background-color 0.2s ease, border-color 0.2s ease;
@@ -4130,9 +4137,14 @@ input:checked + .toggle-slider:before {
 }
 
 .folder-count-pill {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-dim);
+  background: var(--bg-hover);
+  padding: 2px 7px;
+  border-radius: 10px;
   margin-left: auto;
+  font-weight: 500;
+  flex-shrink: 0;
 }
 
 .grid-s3-pill {

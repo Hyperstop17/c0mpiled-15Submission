@@ -439,7 +439,7 @@ export default function App() {
   }
 
   return (
-    <div className="cognidrive-app-root">
+    <div className="cogni-app-root cognidrive-app-root">
       {/* Universal Top Navigation */}
       <Navbar 
         searchQuery={searchQuery}
@@ -451,7 +451,7 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      <div className="app-main-layout">
+      <div className="cogni-body-layout app-main-layout">
         {/* Google Drive / Slack Unified Sidebar */}
         <Sidebar 
           currentView={currentView}
@@ -459,6 +459,8 @@ export default function App() {
           spaces={spaces}
           selectedSpaceId={selectedSpaceId}
           setSelectedSpaceId={setSelectedSpaceId}
+          onOpenUpload={() => setIsUploadModalOpen(true)}
+          onOpenNewSpace={() => setIsNewSpaceModalOpen(true)}
           onOpenUploadModal={() => setIsUploadModalOpen(true)}
           onOpenNewSpaceModal={() => setIsNewSpaceModalOpen(true)}
           onOpenAddModelModal={() => setIsAddModelModalOpen(true)}
@@ -469,15 +471,16 @@ export default function App() {
         />
 
         {/* Dynamic Center Workspaces */}
-        <main className="workspace-content-pane">
+        <main className="cogni-main-content workspace-content-pane">
           {currentView === 'drive' && (
             <DriveView 
               files={files}
               folders={folders}
+              spaces={spaces}
               searchQuery={searchQuery}
               onOpenFile={(file) => setPreviewFile(file)}
               onDeleteFile={handleDeleteFile}
-              onUploadClick={() => setIsUploadModalOpen(true)}
+              onOpenUpload={() => setIsUploadModalOpen(true)}
               onMountToSpace={(file) => {
                 if (currentSpace) {
                   handleSaveConnections(currentSpace.id, [...new Set([...(currentSpace.connectedFileIds || []), file.id])]);

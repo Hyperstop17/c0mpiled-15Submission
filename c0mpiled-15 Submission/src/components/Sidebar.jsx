@@ -114,7 +114,7 @@ export default function Sidebar({
           <button 
             className="icon-mini-btn" 
             title="Create Space"
-            onClick={onOpenNewSpace}
+            onClick={handleNewSpace}
           >
             <Plus size={15} />
           </button>
