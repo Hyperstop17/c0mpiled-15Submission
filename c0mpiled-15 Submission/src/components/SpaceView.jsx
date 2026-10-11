@@ -183,7 +183,7 @@ export default function SpaceView({
         </div>
 
         <div className="space-header-right">
-          <span className="space-owner-badge" title="Workspace Owner">Damien K.</span>
+          <span className="space-owner-badge" title="Chat Space">Workspace</span>
 
           {/* Connected Files Button */}
           <button 
@@ -196,7 +196,7 @@ export default function SpaceView({
 
           <button 
             className="btn-connect-more"
-            onClick={onOpenConnectModal}
+            onClick={() => onOpenConnectModal && onOpenConnectModal(space.id)}
             title="Attach more files from Drive"
           >
             <Plus size={15} />

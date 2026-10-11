@@ -85,10 +85,17 @@ export default function App() {
   // Session State (Cookies & LocalStorage auto sign-in)
   const [session, setSession] = useState(() => getActiveSession());
 
+  // Determine if this is the explicit dev testing profile
+  const isDevSession = Boolean(session && (
+    session.id === 'damien-k' ||
+    session.email === 'damien.dev@cognidrive.local' ||
+    session.mode === 'demo'
+  ));
+
   // Workspace State per user (safe defaults while cloud state loads)
-  const [files, setFiles] = useState(() => INITIAL_FILES);
-  const [folders, setFolders] = useState(() => INITIAL_FOLDERS);
-  const [spaces, setSpaces] = useState(() => INITIAL_SPACES);
+  const [files, setFiles] = useState(() => isDevSession ? INITIAL_FILES : []);
+  const [folders, setFolders] = useState(() => isDevSession ? INITIAL_FOLDERS : FRESH_FOLDERS);
+  const [spaces, setSpaces] = useState(() => isDevSession ? INITIAL_SPACES : [FRESH_SPACE]);
   const [customModels, setCustomModels] = useState([]);
 
   // Ref flag to ensure we only persist after active user state has loaded
@@ -96,7 +103,7 @@ export default function App() {
 
   const [teamMembers] = useState(TEAM_MEMBERS);
   const [currentView, setCurrentView] = useState('drive'); // 'drive', 'space', 'agents'
-  const [selectedSpaceId, setSelectedSpaceId] = useState('space-1');
+  const [selectedSpaceId, setSelectedSpaceId] = useState(() => isDevSession ? 'space-1' : 'space-general');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Dark Mode Theme State
@@ -127,19 +134,35 @@ export default function App() {
     loadUserStateFromCloud(session).then((cloudState) => {
       if (!isMounted) return;
 
-      if (cloudState && cloudState.files && cloudState.files.length > 0) {
-        setFiles(cloudState.files);
-        setFolders(cloudState.folders || INITIAL_FOLDERS);
-        setSpaces(cloudState.spaces || INITIAL_SPACES);
+      const isDevProfile = session.id === 'damien-k' || 
+                           session.email === 'damien.dev@cognidrive.local' || 
+                           session.mode === 'demo';
+
+      if (cloudState && (cloudState.files || cloudState.spaces || cloudState.folders)) {
+        let loadedFiles = cloudState.files || [];
+        let loadedSpaces = cloudState.spaces || [];
+
+        if (!isDevProfile) {
+          // Strict multi-user isolation: purge any dev test files or spaces that might have leaked
+          const devFileIds = new Set(['f-1', 'f-2', 'f-3', 'f-4', 'f-5']);
+          loadedFiles = loadedFiles.filter(f => !devFileIds.has(f.id) && f.userId !== 'damien-k');
+          loadedSpaces = loadedSpaces.filter(s => s.id !== 'space-1' && s.id !== 'space-2' && s.id !== 'space-3');
+          if (loadedSpaces.length === 0) {
+            loadedSpaces = [FRESH_SPACE];
+          }
+        }
+
+        setFiles(loadedFiles);
+        setFolders(cloudState.folders || (isDevProfile ? INITIAL_FOLDERS : FRESH_FOLDERS));
+        setSpaces(loadedSpaces);
         setCustomModels(cloudState.customModels || []);
-        if (cloudState.spaces?.length > 0) {
-          setSelectedSpaceId(cloudState.spaces[0].id);
+
+        if (loadedSpaces.length > 0) {
+          setSelectedSpaceId(prev => loadedSpaces.some(s => s.id === prev) ? prev : loadedSpaces[0].id);
         }
       } else {
         // Initial setup for this user profile
-        const isDamienOrDemo = session.email?.toLowerCase().includes('damien') || session.mode === 'demo';
-
-        if (isDamienOrDemo) {
+        if (isDevProfile) {
           setFiles(INITIAL_FILES);
           setFolders(INITIAL_FOLDERS);
           setSpaces(INITIAL_SPACES);
@@ -152,7 +175,7 @@ export default function App() {
             name: `Welcome_${cleanName.replace(/\s+/g, '_')}.md`,
             author: cleanName,
             userId: getCleanUserId(session),
-            content: `# Welcome to CogniDrive, ${cleanName}! 📂\n\nYour private workspace is provisioned with AWS cloud storage under \`users/${getCleanUserId(session)}/documents/\`.\n\n### Quick Start:\n1. Upload your own documents (PDF, Word .docx, CSV, Code, Images) via **+ New**\n2. Right-click anywhere on the canvas to create folders or documents\n3. Connect custom AI model API keys under **Account Settings**\n4. Ask the AI Co-Pilot questions grounded directly in your uploaded files!`
+            content: `# Welcome to CogniDrive, ${cleanName}! 📂\n\nYour private workspace is provisioned with AWS cloud storage under \`users/${getCleanUserId(session)}/documents/\`.\n\n### Quick Start:\n1. Upload your own documents (PDF, Word .docx, CSV, Code, Images) via **+ New**\n2. Right-click anywhere on the canvas to create folders or documents\n3. Connect custom AI model API keys under **AI Models**\n4. Ask the AI Co-Pilot questions grounded directly in your uploaded files!`
           };
           setFiles([userWelcomeDoc]);
           setFolders(FRESH_FOLDERS);
@@ -426,6 +449,19 @@ export default function App() {
     };
 
     setSpaces(prev => [...prev, newSpace]);
+
+    if (newSpace.connectedFileIds?.length > 0) {
+      setFiles(prev => prev.map(f => {
+        if (newSpace.connectedFileIds.includes(f.id)) {
+          return {
+            ...f,
+            connectedSpaces: [...new Set([...(f.connectedSpaces || []), newSpace.id])]
+          };
+        }
+        return f;
+      }));
+    }
+
     setSelectedSpaceId(newSpace.id);
     setCurrentView('space');
     showToast(`Space "#${newSpace.name}" launched!`);
@@ -494,12 +530,13 @@ export default function App() {
 
           {currentView === 'space' && currentSpace && (
             <SpaceView 
+              key={currentSpace.id}
               space={currentSpace}
               allFiles={files}
               allBots={allBots}
               teamMembers={teamMembers}
               onSendMessage={(msg) => handleSendMessage(currentSpace.id, msg)}
-              onOpenConnectModal={(spaceId) => setConnectModalSpaceId(spaceId)}
+              onOpenConnectModal={(spaceId) => setConnectModalSpaceId(spaceId || currentSpace.id)}
               onOpenFile={(file) => setPreviewFile(file)}
               onUnmountFile={(fileId) => handleUnmountFile(currentSpace.id, fileId)}
               onSaveArtifact={(artifact, content) => handleSaveArtifactToDrive(currentSpace.id, artifact, content)}
@@ -510,6 +547,7 @@ export default function App() {
           {currentView === 'agents' && (
             <AgentsView 
               bots={allBots}
+              spaces={spaces || []}
               filesCount={files.length}
               spacesCount={spaces.length}
               onOpenAddModel={() => setIsAddModelModalOpen(true)}
@@ -537,9 +575,13 @@ export default function App() {
       {/* Mount / Connect Files to Space Modal */}
       {connectModalSpaceId && (
         <ConnectFilesModal 
-          space={spaces.find(s => s.id === connectModalSpaceId)}
+          space={spaces.find(s => s.id === connectModalSpaceId) || currentSpace}
           allFiles={files}
           onClose={() => setConnectModalSpaceId(null)}
+          onSaveConnections={(spaceId, fileIds) => {
+            handleSaveConnections(spaceId || connectModalSpaceId, fileIds);
+            setConnectModalSpaceId(null);
+          }}
           onSave={(fileIds) => {
             handleSaveConnections(connectModalSpaceId, fileIds);
             setConnectModalSpaceId(null);

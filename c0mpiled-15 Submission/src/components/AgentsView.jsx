@@ -14,7 +14,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 
-export default function AgentsView({ bots, spaces, onOpenAddModel, onDeleteCustomBot }) {
+export default function AgentsView({ bots = [], spaces = [], onOpenAddModel, onDeleteCustomBot }) {
   const getBotIcon = (bot) => {
     if (bot.avatar && typeof bot.avatar === 'string' && bot.avatar.length <= 4) {
       return <span style={{ fontSize: '20px' }}>{bot.avatar}</span>;
@@ -44,8 +44,8 @@ export default function AgentsView({ bots, spaces, onOpenAddModel, onDeleteCusto
       </div>
 
       <div className="agents-grid">
-        {bots.map(bot => {
-          const spacesActiveIn = spaces.filter(s => s.activeBots?.includes(bot.id));
+        {(bots || []).map(bot => {
+          const spacesActiveIn = (spaces || []).filter(s => s.activeBots?.includes(bot.id));
           const hasApiKey = Boolean(bot.apiKey && bot.apiKey.trim());
 
           return (

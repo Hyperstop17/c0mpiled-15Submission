@@ -12,13 +12,14 @@ import {
 } from 'lucide-react';
 
 export default function ConnectFilesModal({
-  space,
-  allFiles,
+  space = {},
+  allFiles = [],
   onClose,
-  onSaveConnections
+  onSaveConnections,
+  onSave
 }) {
   const [selectedFileIds, setSelectedFileIds] = useState(
-    new Set(space.connectedFileIds || [])
+    new Set(space?.connectedFileIds || [])
   );
   const [filterQuery, setFilterQuery] = useState('');
 
@@ -33,7 +34,12 @@ export default function ConnectFilesModal({
   };
 
   const handleSave = () => {
-    onSaveConnections(space.id, Array.from(selectedFileIds));
+    const fileIds = Array.from(selectedFileIds);
+    if (onSaveConnections && space?.id) {
+      onSaveConnections(space.id, fileIds);
+    } else if (onSave) {
+      onSave(fileIds);
+    }
     onClose();
   };
 
@@ -55,7 +61,7 @@ export default function ConnectFilesModal({
           <div className="modal-title-wrap">
             <Link2 size={20} className="text-indigo" />
             <div>
-              <h2 className="modal-title">Mount Drive Files to #{space.name}</h2>
+              <h2 className="modal-title">Mount Drive Files to #{space?.name || 'Space'}</h2>
               <div className="modal-subtitle">
                 Select repository documents to ground AI bots in this collaborative space.
               </div>
