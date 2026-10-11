@@ -24,8 +24,7 @@ export default function Sidebar({
   files,
   bots,
   onOpenNewSpace,
-  onOpenUpload,
-  onOpenEvaluation
+  onOpenUpload
 }) {
   const [showNewMenu, setShowNewMenu] = useState(false);
   const [spacesOpen, setSpacesOpen] = useState(true);
@@ -137,7 +136,7 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* AI & Strategy Section */}
+        {/* AI Section */}
         <div className="spaces-section-header" style={{ marginTop: '20px' }}>
           <span className="section-label-simple">Intelligence</span>
         </div>
@@ -148,14 +147,6 @@ export default function Sidebar({
           >
             <Bot size={18} />
             <span>AI Models</span>
-          </button>
-
-          <button 
-            className={`nav-item ${currentView === 'evaluation' ? 'active' : ''}`}
-            onClick={() => setCurrentView('evaluation')}
-          >
-            <Lightbulb size={18} />
-            <span>Strategy & Evaluation</span>
           </button>
         </nav>
       </div>

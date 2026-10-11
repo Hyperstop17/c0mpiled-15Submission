@@ -23,8 +23,12 @@ import {
   HardDriveDownload,
   AlertCircle,
   HelpCircle,
-  MessageSquare
+  MessageSquare,
+  Key,
+  Cpu,
+  Cloud
 } from 'lucide-react';
+import { sendChatMessage } from '../services/chatService';
 
 export default function SpaceView({
   space,
@@ -37,16 +41,24 @@ export default function SpaceView({
   onToggleFileContext,
   onOpenFile,
   onSaveArtifactToDrive,
-  onOpenConnectModal
+  onOpenConnectModal,
+  onOpenAddModel
 }) {
   const [inputText, setInputText] = useState('');
-  const [selectedBotId, setSelectedBotId] = useState(space.activeBots[0] || 'bot-gemini');
+  const [selectedBotId, setSelectedBotId] = useState(space.activeBots[0] || allBots[0]?.id || 'bot-gemini');
   const [showFilesDrawer, setShowFilesDrawer] = useState(true);
   const [expandedReasoning, setExpandedReasoning] = useState({});
   const [copiedId, setCopiedId] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
   
   const messagesEndRef = useRef(null);
+
+  // Keep selected bot valid if bots list changes
+  useEffect(() => {
+    if (!allBots.some(b => b.id === selectedBotId)) {
+      setSelectedBotId(allBots[0]?.id || 'bot-gemini');
+    }
+  }, [allBots, selectedBotId]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -58,21 +70,18 @@ export default function SpaceView({
   
   // Total tokens in mounted files
   const totalMountedTokens = connectedFiles.reduce((sum, f) => sum + (f.tokens || 0), 0);
-  const maxContextWindow = 1000000; // 1M tokens (Gemini 3.8 standard)
+  const maxContextWindow = 1000000; // 1M tokens standard
   const contextPercentage = Math.min(100, ((totalMountedTokens / maxContextWindow) * 100).toFixed(1));
 
-  const handleSend = () => {
+  const activeBot = allBots.find(b => b.id === selectedBotId) || allBots[0];
+  const hasLiveApiKey = Boolean(activeBot?.apiKey && activeBot.apiKey.trim());
+
+  const handleSend = async () => {
     if (!inputText.trim() || isGenerating) return;
 
-    // Detect @bot mention if present
-    const lower = inputText.toLowerCase();
-    let respondentBotId = selectedBotId;
-    if (lower.includes('@claude')) respondentBotId = 'bot-claude';
-    else if (lower.includes('@gemini')) respondentBotId = 'bot-gemini';
-    else if (lower.includes('@code') || lower.includes('@synthesizer')) respondentBotId = 'bot-coder';
-    else if (lower.includes('@compliance') || lower.includes('@legal') || lower.includes('@audit')) respondentBotId = 'bot-legal';
-
-    const activeBot = allBots.find(b => b.id === respondentBotId) || allBots[0];
+    const promptSnapshot = inputText;
+    setInputText('');
+    setIsGenerating(true);
 
     const userMessage = {
       id: `m-${Date.now()}`,
@@ -80,81 +89,20 @@ export default function SpaceView({
       author: 'Damien K.',
       avatar: 'DK',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      content: inputText
+      content: promptSnapshot
     };
 
     onSendMessage(space.id, userMessage);
-    const promptSnapshot = inputText;
-    setInputText('');
-    setIsGenerating(true);
 
-    // Simulate AI response grounded in the connected files
-    setTimeout(() => {
-      let content = '';
-      let citations = [];
-      let artifactTitle = `Synthesis_${Date.now().toString().slice(-4)}.md`;
-      let artifactPreview = '';
-
-      if (connectedFiles.length === 0) {
-        content = `I received your prompt: "${promptSnapshot}".\n\nNotice: **No files are currently mounted to #${space.name}**. To ground my answers in verified company documentation with exact line citations, click **+ Mount File** in the top right to attach files from your AI Drive.`;
-      } else {
-        // Find matching files based on prompt keywords
-        const financialFile = connectedFiles.find(f => f.name.includes('Financial') || f.tags?.includes('Finance'));
-        const archFile = connectedFiles.find(f => f.name.includes('Architecture') || f.tags?.includes('Architecture'));
-        const interviewFile = connectedFiles.find(f => f.name.includes('Interview') || f.tags?.includes('Interviews'));
-        const legalFile = connectedFiles.find(f => f.name.includes('Agreement') || f.tags?.includes('Legal'));
-        const competitorFile = connectedFiles.find(f => f.name.includes('Competitor') || f.tags?.includes('Strategy'));
-
-        if ((lower.includes('margin') || lower.includes('mrr') || lower.includes('financial') || lower.includes('revenue')) && financialFile) {
-          content = `According to **${financialFile.name}**, your Q3 performance demonstrated remarkable operating leverage:
-- **MRR Expansion**: September MRR closed at **$550,000** (up from $420,000 in July), totaling **$1.455M** for the quarter.
-- **Gross Margins**: Reached **80.5%** in September, driven by a **14% unit cost decrease in GPU inference** through dynamic quantization.
-- **Customer Acquisition**: CAC dropped from $185 to $164, while LTV climbed to $16,200.
-
-**Strategic takeaway for #${space.name}**: Reinvesting these inference savings directly into real-time collaborative vector indexing will solidify our margin moat against single-model competitors.`;
-          citations = [{ fileId: financialFile.id, fileName: financialFile.name, excerpt: 'September MRR $550k, Gross Margin 80.5%, CAC $164, GPU inference cost -14%' }];
-          artifactTitle = 'Q3_Financial_Defensibility_Analysis.md';
-          artifactPreview = 'Detailed breakdown of MRR expansion, unit inference savings, and CAC/LTV trajectory...';
-        } else if ((lower.includes('interview') || lower.includes('customer') || lower.includes('feedback')) && interviewFile) {
-          content = `Cross-referencing customer discovery notes in **${interviewFile.name}**:
-1. **The Isolated AI Tab Problem**: **94% of teams** reported that employees copy-paste confidential enterprise files into disconnected personal browser tabs.
-2. **Drive Disconnect**: Static cloud drives (SharePoint / Google Drive) are treated as file cemeteries—teams cannot collaborate in live chat channels grounded in those documents.
-3. **Core Demand**: A unified platform where team members and AI bots share the same mounted Drive documents in transparent, auditable rooms.`;
-          citations = [{ fileId: interviewFile.id, fileName: interviewFile.name, excerpt: '94% of enterprise teams report employees dumping files into disconnected personal tabs...' }];
-          artifactTitle = 'Enterprise_Customer_Pain_Points_Brief.md';
-          artifactPreview = 'Consolidated synthesis of enterprise customer interviews highlighting isolated AI tab friction...';
-        } else if ((lower.includes('privacy') || lower.includes('training') || lower.includes('legal') || lower.includes('msa') || lower.includes('compliance')) && legalFile) {
-          content = `I reviewed the contractual covenants in **${legalFile.name}**:
-- **Section 4.1 (Customer Data Ownership)**: The customer retains full, perpetual ownership of all files and prompts.
-- **Section 4.2 (Zero AI Training Prohibition)**: Explicitly guarantees that Customer Data will *never* be utilized to train, retrain, or fine-tune public foundation models.
-- **Section 4.3 (Ephemeral Cache Retention)**: Guarantees zero retention on inference buffers.`;
-          citations = [{ fileId: legalFile.id, fileName: legalFile.name, excerpt: 'Section 4.2: Customer Data shall NEVER be utilized to train foundation models.' }];
-          artifactTitle = 'Compliance_Privacy_Audit_Summary.md';
-          artifactPreview = 'Legal verification of Section 4 zero-training guarantees and data ownership clauses...';
-        } else if ((lower.includes('competitor') || lower.includes('notebooklm') || lower.includes('market')) && competitorFile) {
-          content = `Evaluating against **${competitorFile.name}**:
-- **NotebookLM**: Excellent grounding, but restricted to single-player audio/notes and limited to Gemini with no multi-user channels or file write-back.
-- **ChatGPT Team**: Lacks a real hierarchical Drive, file tagging, and multi-model flexibility.
-- **CogniDrive Advantage**: True collaborative Drive + multi-model spaces where ${connectedFiles.length} files are mounted in real-time and team members co-prompt transparently.`;
-          citations = [{ fileId: competitorFile.id, fileName: competitorFile.name, excerpt: 'NotebookLM lacks collaborative team channels; CogniDrive unifies Drive + multi-model spaces.' }];
-          artifactTitle = 'Competitive_Differentiation_Report.md';
-          artifactPreview = 'Market matrix comparing NotebookLM, ChatGPT Team, and CogniDrive capabilities...';
-        } else {
-          // General grounded synthesis across mounted files
-          content = `Grounded synthesis for query: "${promptSnapshot}" across **${connectedFiles.length} mounted Drive files**:
-
-1. **Contextual Correlation**: Scanned mounted sources including ${connectedFiles.map(f => `\`${f.name}\``).slice(0, 3).join(', ')}.
-2. **Key Findings**: The mounted data directly supports a collaborative approach where teammates and domain bots operate with synchronized context.
-3. **Execution Ready**: Generated action points have been prepared and can be committed directly to Drive as a reusable team document.`;
-          citations = connectedFiles.slice(0, 2).map(f => ({
-            fileId: f.id,
-            fileName: f.name,
-            excerpt: f.summary || `Grounded from ${f.name} in #${space.name}`
-          }));
-          artifactTitle = `Grounded_Action_Plan_${Date.now().toString().slice(-4)}.md`;
-          artifactPreview = `Synthesis of ${connectedFiles.map(f => f.name).slice(0, 2).join(' and ')} for #${space.name}...`;
-        }
-      }
+    // Call unified chat service (real API if key configured, otherwise grounded RAG)
+    try {
+      const result = await sendChatMessage({
+        messageText: promptSnapshot,
+        model: activeBot,
+        connectedFiles,
+        spaceName: space.name,
+        conversationHistory: space.messages || []
+      });
 
       const aiResponse = {
         id: `m-${Date.now() + 1}`,
@@ -163,19 +111,34 @@ export default function SpaceView({
         author: activeBot.name,
         avatar: activeBot.avatar,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        reasoningTime: activeBot.id === 'bot-gemini' ? '0.9s' : activeBot.id === 'bot-claude' ? '2.1s' : '1.4s',
-        content: content,
-        citations: citations,
-        hasArtifact: connectedFiles.length > 0,
+        reasoningTime: result.reasoningTime || '1.1s',
+        isLiveApi: result.isLiveApi,
+        content: result.content,
+        citations: result.citations || [],
+        hasArtifact: connectedFiles.length > 0 && !result.error,
         artifactData: {
-          title: artifactTitle,
-          preview: artifactPreview
+          title: `Grounded_Synthesis_${Date.now().toString().slice(-4)}.md`,
+          preview: result.content.slice(0, 160)
         }
       };
 
       onSendMessage(space.id, aiResponse);
+    } catch (err) {
+      const errResponse = {
+        id: `m-${Date.now() + 1}`,
+        senderType: 'ai',
+        botId: activeBot.id,
+        author: activeBot.name,
+        avatar: activeBot.avatar,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        reasoningTime: 'Failed',
+        content: `Error generating response: ${err.message}`,
+        citations: []
+      };
+      onSendMessage(space.id, errResponse);
+    } finally {
       setIsGenerating(false);
-    }, 1100);
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -210,6 +173,11 @@ export default function SpaceView({
           <div className="space-heading-row">
             <h1 className="space-name">{space.name}</h1>
             <span className="badge-live-collab">Chat Space</span>
+            {hasLiveApiKey && (
+              <span className="badge-live-api-pill" title="Connected to live provider API via user key">
+                🟢 Live API Connected
+              </span>
+            )}
           </div>
           <p className="space-desc">{space.description}</p>
         </div>
@@ -248,7 +216,7 @@ export default function SpaceView({
             <div className="grounding-context-ribbon">
               <div className="ribbon-left">
                 <Sparkles size={14} className="text-amber" />
-                <span className="ribbon-title">Grounded Context:</span>
+                <span className="ribbon-title">Grounded Context (AWS S3):</span>
                 <div className="ribbon-files-list">
                   {connectedFiles.map(f => (
                     <span 
@@ -262,8 +230,10 @@ export default function SpaceView({
                   ))}
                 </div>
               </div>
-              <div className="ribbon-token-stat">
-                {(totalMountedTokens / 1000).toFixed(1)}k tokens in scope
+              <div className="ribbon-right">
+                <span className="token-budget-pill">
+                  {(totalMountedTokens / 1000).toFixed(1)}k Tokens
+                </span>
               </div>
             </div>
           )}
@@ -278,12 +248,12 @@ export default function SpaceView({
                 <div key={msg.id} className={`message-row ${isAi ? 'ai-row' : 'human-row'}`}>
                   <div className="message-avatar-wrap">
                     {isAi ? (
-                      <div className="bot-avatar-badge" style={{ backgroundColor: bot?.color || '#6366f1' }}>
+                      <div className="bot-avatar-badge" style={{ backgroundColor: bot?.color || '#0b57d0' }}>
                         {msg.avatar || '🤖'}
                       </div>
                     ) : (
                       <div className="human-avatar-badge">
-                        {msg.avatar || 'U'}
+                        {msg.avatar || 'DK'}
                       </div>
                     )}
                   </div>
@@ -295,6 +265,9 @@ export default function SpaceView({
                         <span className="ai-provider-badge">
                           {bot?.provider || 'AI Model'}
                         </span>
+                      )}
+                      {msg.isLiveApi && (
+                        <span className="badge-live-tag">Live Key</span>
                       )}
                       {msg.reasoningTime && (
                         <span className="reasoning-time-badge">
@@ -326,8 +299,8 @@ export default function SpaceView({
                         </button>
                         {expandedReasoning[msg.id] && (
                           <div className="reasoning-content-box">
-                            <p><strong>Vector Grounding pass:</strong> Scanned {connectedFiles.length} mounted documents.</p>
-                            <p><strong>Semantic Relevance:</strong> Matched key clauses in <code>{connectedFiles[0]?.name || 'Drive source'}</code> with 98.4% retrieval confidence.</p>
+                            <p><strong>Vector Grounding pass:</strong> Scanned {connectedFiles.length} mounted documents from AWS S3 storage.</p>
+                            <p><strong>Active Model:</strong> {bot?.name} ({bot?.provider}) • Context: {totalMountedTokens.toLocaleString()} tokens.</p>
                           </div>
                         )}
                       </div>
@@ -379,14 +352,12 @@ export default function SpaceView({
                           <Sparkles size={15} className="text-amber" />
                           <div>
                             <strong>Generated Artifact:</strong> {msg.artifactData?.title}
-                            <div className="artifact-banner-desc">
-                              Ready to be committed directly into your shared Drive repository.
-                            </div>
+                            <span className="artifact-preview-sub">Save this grounded analysis directly to your Drive</span>
                           </div>
                         </div>
                         <button 
                           className="btn-save-drive"
-                          onClick={() => onSaveArtifactToDrive(space.id, msg.artifactData, msg.content, msg.author)}
+                          onClick={() => onSaveArtifactToDrive(space.id, msg.artifactData, msg.content)}
                         >
                           <HardDriveDownload size={14} />
                           <span>Save to Drive</span>
@@ -402,13 +373,17 @@ export default function SpaceView({
             {isGenerating && (
               <div className="message-row ai-row generating-row">
                 <div className="message-avatar-wrap">
-                  <div className="bot-avatar-badge generating-pulse">⚡</div>
-                </div>
-                <div className="message-content-wrapper">
-                  <div className="generating-indicator">
-                    <Sparkles size={14} className="text-indigo spin" />
-                    <span>Synthesizing answer from mounted Drive files...</span>
+                  <div className="bot-avatar-badge" style={{ backgroundColor: activeBot?.color || '#0b57d0' }}>
+                    {activeBot?.avatar || '⚡'}
                   </div>
+                </div>
+                <div className="generating-indicator">
+                  <span className="dot"></span>
+                  <span className="dot"></span>
+                  <span className="dot"></span>
+                  <span className="generating-text">
+                    {hasLiveApiKey ? `${activeBot?.name} generating live response...` : `${activeBot?.name} grounding across ${connectedFiles.length} files...`}
+                  </span>
                 </div>
               </div>
             )}
@@ -416,55 +391,74 @@ export default function SpaceView({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick Grounded Prompts */}
-          <div className="suggested-prompts-bar">
-            <span className="suggested-label">Suggestions:</span>
+          {/* Quick Example Suggestions */}
+          <div className="space-prompts-bar">
+            <span className="prompts-label">Try example:</span>
             <button 
-              className="prompt-chip"
-              onClick={() => applySuggestedPrompt("What are the key conflicts or agreements between our mounted files?")}
+              className="prompt-chip" 
+              onClick={() => applySuggestedPrompt("Summarize key points from my mounted files")}
             >
-              Analyze cross-file agreements
+              "Summarize key points from mounted files"
             </button>
             <button 
-              className="prompt-chip"
-              onClick={() => applySuggestedPrompt("Generate an executive 1-page summary grounded in these documents.")}
+              className="prompt-chip" 
+              onClick={() => applySuggestedPrompt("What are the main risks and operational action items in these documents?")}
             >
-              Draft 1-page executive summary
+              "Extract risks & action items"
             </button>
-            <button 
-              className="prompt-chip"
-              onClick={() => applySuggestedPrompt("What critical risks or gaps are missing from our current data?")}
-            >
-              Audit critical gaps & risks
-            </button>
+            {connectedFiles.length === 0 && (
+              <button 
+                className="prompt-chip highlight" 
+                onClick={onOpenConnectModal}
+              >
+                + Mount a file to ground answers
+              </button>
+            )}
           </div>
 
-          {/* Chat Input Box */}
-          <div className="chat-input-container">
+          {/* Bottom Chat Prompt Box */}
+          <div className="space-input-box">
             <div className="input-toolbar-top">
-              <div className="model-selector-wrapper">
-                <span className="selector-label">Respondent:</span>
+              {/* Bot Selector */}
+              <div className="bot-selector-wrap">
+                <span className="model-label">Model:</span>
                 <select 
-                  value={selectedBotId}
+                  value={selectedBotId} 
                   onChange={(e) => setSelectedBotId(e.target.value)}
                   className="model-select"
                 >
                   {allBots.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.avatar} {b.name} ({b.provider})
+                      {b.avatar} {b.name} ({b.provider}) {b.apiKey ? '• 🟢 Live' : ''}
                     </option>
                   ))}
                 </select>
+
+                {onOpenAddModel && (
+                  <button 
+                    type="button" 
+                    className="btn-add-model-quick" 
+                    onClick={onOpenAddModel}
+                    title="Add custom model or API key"
+                  >
+                    <Plus size={13} />
+                    <span>API Key</span>
+                  </button>
+                )}
               </div>
 
               <div className="input-hint-right">
-                Use <strong>@bot</strong> or <strong>@filename</strong> to reference files
+                {hasLiveApiKey ? (
+                  <span className="text-green font-semibold">🟢 Using Your Live API Key</span>
+                ) : (
+                  <span>Grounded in {connectedFiles.length} file(s) via AWS S3</span>
+                )}
               </div>
             </div>
 
             <div className="input-textarea-wrapper">
               <textarea 
-                placeholder={`Ask ${allBots.find(b => b.id === selectedBotId)?.name || 'AI'} anything about the ${connectedFiles.length} connected files... (Press Enter to send)`}
+                placeholder={`Ask ${activeBot?.name || 'AI'} anything about the ${connectedFiles.length} connected files... (Press Enter to send)`}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -549,18 +543,17 @@ export default function SpaceView({
                         <span className="drawer-file-tokens">{(file.tokens / 1000).toFixed(1)}k tokens • {file.type}</span>
                       </div>
                     </div>
-
                     <div className="drawer-file-actions">
                       <button 
                         className="btn-drawer-inspect"
-                        title="Preview File"
+                        title="Preview file"
                         onClick={() => onOpenFile(file)}
                       >
                         <Eye size={13} />
                       </button>
                       <button 
                         className="btn-drawer-unlink"
-                        title="Unmount from this Space"
+                        title="Unmount from this space"
                         onClick={() => onUnmountFile(space.id, file.id)}
                       >
                         <X size={13} />
@@ -571,11 +564,11 @@ export default function SpaceView({
               )}
             </div>
 
-            {/* Add More Files CTA */}
+            {/* Drawer Footer Actions */}
             <div className="drawer-footer-actions">
               <button className="btn-add-more-drive" onClick={onOpenConnectModal}>
-                <Plus size={15} />
-                <span>Attach Files from Drive</span>
+                <Plus size={14} />
+                <span>Mount More Files</span>
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 :root {
-  /* Google Drive Minimalist Theme Tokens */
+  /* Google Drive Minimalist Theme Tokens (Light Mode Default) */
   --bg-canvas: #f8fafd;
   --bg-surface: #ffffff;
   --bg-sidebar: #f8fafd;
@@ -8,6 +8,15 @@
   --text-active: #001d35;
   --bg-search: #e9eef6;
   --bg-input: #ffffff;
+  --bg-card: #f8fafd;
+  --bg-dialog: #ffffff;
+
+  /* Material 3 Surface Containers (Light Mode) */
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f7f9fc;
+  --surface-container: #f0f4f9;
+  --surface-container-high: #e9eef6;
+  --surface-container-highest: #e1e6ee;
 
   --border-subtle: #e0e2ec;
   --border-strong: #c4c7c5;
@@ -17,16 +26,73 @@
   --text-muted: #444746;
   --text-dim: #747775;
 
+  /* Google Workspace Brand Accents */
   --google-blue: #0b57d0;
   --google-blue-hover: #0842a0;
   --google-blue-light: #c2e7ff;
+  --on-primary: #ffffff;
   
   --google-green: #188038;
   --google-red: #d93025;
   --google-yellow: #f9ab00;
+  --google-purple: #7b1fa2;
+
+  /* Material 3 Elevations */
+  --shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.08);
+  --shadow-md: 0 1px 3px 0 rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.2);
+  --elevation-1: 0 1px 3px 1px rgba(60, 64, 67, 0.15), 0 1px 2px 0 rgba(60, 64, 67, 0.3);
+  --elevation-2: 0 2px 6px 2px rgba(60, 64, 67, 0.15), 0 1px 2px 0 rgba(60, 64, 67, 0.3);
 
   --font-sans: 'Google Sans', 'Roboto', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'Roboto Mono', 'JetBrains Mono', Consolas, monospace;
+}
+
+[data-theme="dark"],
+.dark {
+  /* Google Drive Minimalist Theme Tokens (Dark Mode) */
+  --bg-canvas: #131314;
+  --bg-surface: #1e1f20;
+  --bg-sidebar: #131314;
+  --bg-hover: #2d2f31;
+  --bg-active: #004a77;
+  --text-active: #c2e7ff;
+  --bg-search: #282a2c;
+  --bg-input: #282a2c;
+  --bg-card: #282a2c;
+  --bg-dialog: #282a2c;
+
+  /* Material 3 Surface Containers (Dark Mode) */
+  --surface-container-lowest: #0e0e0e;
+  --surface-container-low: #1a1b1d;
+  --surface-container: #222325;
+  --surface-container-high: #282a2c;
+  --surface-container-highest: #333538;
+
+  --border-subtle: #2d2f31;
+  --border-strong: #444746;
+  --border-focus: #a8c7fa;
+
+  --text-main: #e3e3e3;
+  --text-muted: #c4c7c5;
+  --text-dim: #8e918f;
+
+  /* Google Workspace Brand Accents (Dark Mode M3) */
+  --google-blue: #a8c7fa;
+  --google-blue-hover: #d3e3fd;
+  --google-blue-light: #004a77;
+  --on-primary: #001d35;
+
+  --google-green: #6dd58c;
+  --google-red: #f28b82;
+  --google-yellow: #fdd663;
+  --google-purple: #d7aefb;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 4px 8px 3px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+  --elevation-1: 0 1px 3px 1px rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.6);
+  --elevation-2: 0 2px 6px 2px rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -45,6 +111,7 @@ html, body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {
@@ -64,6 +131,11 @@ button {
   transition: all 0.15s ease-in-out;
 }
 
+button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
 input, textarea, select {
   font-family: inherit;
   font-size: inherit;
@@ -73,11 +145,13 @@ input, textarea, select {
   border-radius: 8px;
   padding: 8px 12px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, background-color 0.2s, box-shadow 0.15s;
 }
 
-input:focus, textarea:focus, select:focus {
+input:focus-visible, textarea:focus-visible, select:focus-visible {
   border-color: var(--border-focus);
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
 }
 
 /* Custom scrollbars */
@@ -89,9 +163,9 @@ input:focus, textarea:focus, select:focus {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c4c7c5;
+  background: var(--border-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #747775;
+  background: var(--text-dim);
 }

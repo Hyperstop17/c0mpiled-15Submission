@@ -2,22 +2,25 @@ import React from 'react';
 import { 
   Search, 
   HardDrive,
-  Bot,
-  Lightbulb,
   SlidersHorizontal,
-  HelpCircle
+  Settings,
+  Cloud,
+  LogOut
 } from 'lucide-react';
+import { AWS_S3_CONFIG } from '../services/storageService';
 
 export default function Navbar({ 
   searchQuery, 
   setSearchQuery, 
-  totalTokens, 
-  filesCount, 
-  spacesCount,
-  onOpenEvaluation,
+  onOpenSettings,
   currentView,
-  setCurrentView
+  setCurrentView,
+  user,
+  onLogout
 }) {
+  const userName = user?.name || 'Damien K.';
+  const initials = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'DK';
+
   return (
     <header className="navbar-container">
       <div className="navbar-left">
@@ -28,6 +31,12 @@ export default function Navbar({
           <div className="brand-text">
             <span className="brand-name">CogniDrive</span>
           </div>
+        </div>
+
+        {/* AWS S3 Backend Indicator */}
+        <div className="nav-s3-pill" title={`Backed by AWS S3 Bucket: ${AWS_S3_CONFIG.bucket} (${AWS_S3_CONFIG.region})`}>
+          <Cloud size={13} className="text-indigo" />
+          <span>AWS S3</span>
         </div>
       </div>
 
@@ -50,22 +59,38 @@ export default function Navbar({
       </div>
 
       <div className="navbar-right">
+        {/* Settings button */}
         <button 
-          className="eval-nav-btn"
-          onClick={onOpenEvaluation}
-          title="Concept Evaluation & Roadmap"
+          className="navbar-icon-btn" 
+          onClick={onOpenSettings} 
+          title="Settings, Appearance & AWS Status"
         >
-          <Lightbulb size={16} className="eval-icon" />
-          <span>Evaluation & Plan</span>
+          <Settings size={19} />
         </button>
 
-        <div className="user-profile-widget" title="Damien K. (Workspace Owner)">
-          <div className="user-avatar-badge">DK</div>
+        {/* Account profile widget */}
+        <div 
+          className="user-profile-widget" 
+          onClick={onOpenSettings} 
+          title={`Account settings (${userName})`}
+        >
+          <div className="user-avatar-badge">{initials}</div>
           <div className="user-info-text">
-            <span className="user-name">Damien K.</span>
+            <span className="user-name">{userName}</span>
             <span className="user-org">Owner</span>
           </div>
         </div>
+
+        {/* Switch Workspace / Logout Button */}
+        {onLogout && (
+          <button 
+            className="navbar-icon-btn logout-btn" 
+            onClick={onLogout} 
+            title="Switch Workspace / Landing Page"
+          >
+            <LogOut size={17} />
+          </button>
+        )}
       </div>
     </header>
   );
