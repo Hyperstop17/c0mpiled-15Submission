@@ -31,10 +31,11 @@ import {
 import { sendChatMessage } from '../services/chatService';
 
 export default function SpaceView({
-  space,
-  allFiles,
-  allBots,
-  teamMembers,
+  space = {},
+  allFiles = [],
+  allBots = [],
+  teamMembers = [],
+  user,
   onSendMessage,
   onMountFiles,
   onUnmountFile,
@@ -45,7 +46,7 @@ export default function SpaceView({
   onOpenAddModel
 }) {
   const [inputText, setInputText] = useState('');
-  const [selectedBotId, setSelectedBotId] = useState(space.activeBots[0] || allBots[0]?.id || 'bot-gemini');
+  const [selectedBotId, setSelectedBotId] = useState(space.activeBots?.[0] || allBots[0]?.id || 'bot-gemini');
   const [showFilesDrawer, setShowFilesDrawer] = useState(true);
   const [expandedReasoning, setExpandedReasoning] = useState({});
   const [copiedId, setCopiedId] = useState(null);
@@ -66,14 +67,19 @@ export default function SpaceView({
   }, [space.messages, isGenerating]);
 
   // Connected files for this space
-  const connectedFiles = allFiles.filter(f => space.connectedFileIds?.includes(f.id));
+  const connectedFiles = (allFiles || []).filter(f => space.connectedFileIds?.includes(f.id));
   
   // Total tokens in mounted files
   const totalMountedTokens = connectedFiles.reduce((sum, f) => sum + (f.tokens || 0), 0);
   const maxContextWindow = 1000000; // 1M tokens standard
   const contextPercentage = Math.min(100, ((totalMountedTokens / maxContextWindow) * 100).toFixed(1));
 
-  const activeBot = allBots.find(b => b.id === selectedBotId) || allBots[0];
+  const activeBot = allBots.find(b => b.id === selectedBotId) || allBots[0] || {
+    id: 'bot-gemini',
+    name: 'Gemini 3.8 Flash',
+    avatar: '⚡',
+    color: '#1a73e8'
+  };
   const hasLiveApiKey = Boolean(activeBot?.apiKey && activeBot.apiKey.trim());
 
   const handleSend = async () => {
@@ -83,16 +89,21 @@ export default function SpaceView({
     setInputText('');
     setIsGenerating(true);
 
+    const userName = user?.name || 'You';
+    const userAvatar = user?.name ? user.name.slice(0, 2).toUpperCase() : 'You';
+
     const userMessage = {
       id: `m-${Date.now()}`,
       senderType: 'human',
-      author: 'Damien K.',
-      avatar: 'DK',
+      author: userName,
+      avatar: userAvatar,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       content: promptSnapshot
     };
 
-    onSendMessage(space.id, userMessage);
+    if (onSendMessage && space?.id) {
+      onSendMessage(space.id, userMessage);
+    }
 
     // Call unified chat service (real API if key configured, otherwise grounded RAG)
     try {
@@ -100,7 +111,7 @@ export default function SpaceView({
         messageText: promptSnapshot,
         model: activeBot,
         connectedFiles,
-        spaceName: space.name,
+        spaceName: space.name || 'Workspace',
         conversationHistory: space.messages || []
       });
 
@@ -109,7 +120,7 @@ export default function SpaceView({
         senderType: 'ai',
         botId: activeBot.id,
         author: activeBot.name,
-        avatar: activeBot.avatar,
+        avatar: activeBot.avatar || '🤖',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         reasoningTime: result.reasoningTime || '1.1s',
         isLiveApi: result.isLiveApi,
@@ -118,24 +129,28 @@ export default function SpaceView({
         hasArtifact: connectedFiles.length > 0 && !result.error,
         artifactData: {
           title: `Grounded_Synthesis_${Date.now().toString().slice(-4)}.md`,
-          preview: result.content.slice(0, 160)
+          preview: (result.content || '').slice(0, 160)
         }
       };
 
-      onSendMessage(space.id, aiResponse);
+      if (onSendMessage && space?.id) {
+        onSendMessage(space.id, aiResponse);
+      }
     } catch (err) {
       const errResponse = {
         id: `m-${Date.now() + 1}`,
         senderType: 'ai',
         botId: activeBot.id,
         author: activeBot.name,
-        avatar: activeBot.avatar,
+        avatar: activeBot.avatar || '🤖',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         reasoningTime: 'Failed',
         content: `Error generating response: ${err.message}`,
         citations: []
       };
-      onSendMessage(space.id, errResponse);
+      if (onSendMessage && space?.id) {
+        onSendMessage(space.id, errResponse);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -240,7 +255,7 @@ export default function SpaceView({
 
           {/* Messages List */}
           <div className="messages-scroll-area">
-            {space.messages.map((msg) => {
+            {(space.messages || []).map((msg) => {
               const isAi = msg.senderType === 'ai';
               const bot = isAi ? allBots.find(b => b.id === msg.botId) : null;
 
@@ -409,7 +424,7 @@ export default function SpaceView({
             {connectedFiles.length === 0 && (
               <button 
                 className="prompt-chip highlight" 
-                onClick={onOpenConnectModal}
+                onClick={() => onOpenConnectModal && onOpenConnectModal(space?.id)}
               >
                 + Mount a file to ground answers
               </button>
@@ -468,7 +483,7 @@ export default function SpaceView({
                 <button 
                   className="input-action-icon" 
                   title="Mount files from Drive"
-                  onClick={onOpenConnectModal}
+                  onClick={() => onOpenConnectModal && onOpenConnectModal(space?.id)}
                 >
                   <Paperclip size={16} />
                 </button>
@@ -529,7 +544,7 @@ export default function SpaceView({
                 <div className="empty-drawer-state">
                   <AlertCircle size={28} className="text-muted" />
                   <p>No files mounted to this space yet.</p>
-                  <button className="btn-mount-first" onClick={onOpenConnectModal}>
+                  <button className="btn-mount-first" onClick={() => onOpenConnectModal && onOpenConnectModal(space?.id)}>
                     + Mount Files from Drive
                   </button>
                 </div>
@@ -566,7 +581,7 @@ export default function SpaceView({
 
             {/* Drawer Footer Actions */}
             <div className="drawer-footer-actions">
-              <button className="btn-add-more-drive" onClick={onOpenConnectModal}>
+              <button className="btn-add-more-drive" onClick={() => onOpenConnectModal && onOpenConnectModal(space?.id)}>
                 <Plus size={14} />
                 <span>Mount More Files</span>
               </button>

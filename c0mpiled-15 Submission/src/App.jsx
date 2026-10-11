@@ -295,11 +295,16 @@ export default function App() {
 
   // Send message in space
   const handleSendMessage = (spaceId, message) => {
+    const targetSpaceId = (typeof spaceId === 'string' && message) ? spaceId : (selectedSpaceId || currentSpace?.id);
+    const targetMessage = message || spaceId;
+
+    if (!targetMessage) return;
+
     setSpaces(prev => prev.map(sp => {
-      if (sp.id === spaceId) {
+      if (sp.id === targetSpaceId) {
         return {
           ...sp,
-          messages: [...sp.messages, message]
+          messages: [...(sp.messages || []), targetMessage]
         };
       }
       return sp;
@@ -532,10 +537,15 @@ export default function App() {
             <SpaceView 
               key={currentSpace.id}
               space={currentSpace}
+              user={session}
               allFiles={files}
               allBots={allBots}
               teamMembers={teamMembers}
-              onSendMessage={(msg) => handleSendMessage(currentSpace.id, msg)}
+              onSendMessage={(targetSpaceId, msg) => {
+                const sId = (typeof targetSpaceId === 'string' && msg) ? targetSpaceId : currentSpace.id;
+                const m = msg || targetSpaceId;
+                handleSendMessage(sId, m);
+              }}
               onOpenConnectModal={(spaceId) => setConnectModalSpaceId(spaceId || currentSpace.id)}
               onOpenFile={(file) => setPreviewFile(file)}
               onUnmountFile={(fileId) => handleUnmountFile(currentSpace.id, fileId)}

@@ -6,22 +6,23 @@
 
 export async function sendChatMessage({
   messageText,
-  model,
+  model = {},
   connectedFiles = [],
   spaceName = 'Workspace',
   conversationHistory = []
 }) {
   const startTime = performance.now();
+  const safeModel = model || { name: 'AI Model', provider: 'General' };
 
   // Prepare RAG Grounding Context from mounted files
   const ragContext = buildRagContext(connectedFiles);
 
   // If model has a real API key configured, execute live HTTP request
-  if (model.apiKey && model.apiKey.trim()) {
+  if (safeModel.apiKey && safeModel.apiKey.trim()) {
     try {
       const response = await callLiveProviderApi({
         messageText,
-        model,
+        model: safeModel,
         ragContext,
         conversationHistory
       });
@@ -73,112 +74,163 @@ function buildRagContext(connectedFiles) {
 }
 
 /**
- * Dispatch live request to the target provider
+ * Dispatch live request to the target provider via server proxy or direct fallback
  */
 async function callLiveProviderApi({ messageText, model, ragContext, conversationHistory }) {
   const provider = (model.provider || '').toLowerCase();
-  const apiKey = model.apiKey.trim();
+  const apiKey = (model.apiKey || '').trim();
   const modelId = model.modelId || model.id || 'gpt-4o-mini';
 
-  const systemPrompt = `You are a helpful AI assistant in CogniDrive collaborating with Damien K.
-You have direct read access to the following documents mounted in this space:
+  const systemPrompt = `You are a helpful AI assistant in CogniDrive.
+You have direct read access to the following documents mounted in this collaborative space:
 
 ${ragContext || 'No documents currently mounted.'}
 
 Guidelines:
 - Answer accurately and concisely based on the mounted documents above.
-- Whenever you use information from a mounted document, clearly mention the document name.
+- Whenever you use information from a mounted document, clearly cite the document name.
 - If the answer cannot be found in the mounted documents, state that clearly before answering from general knowledge.`;
 
-  // 1. Google Gemini
-  if (provider.includes('google') || provider.includes('gemini') || modelId.includes('gemini')) {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${systemPrompt}\n\nUser Question:\n${messageText}` }]
-        }
-      ]
-    };
-
-    const res = await fetch(endpoint, {
+  // 1. Primary path: Server-side API Proxy (Zero CORS issues, reliable network delivery)
+  try {
+    const res = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        provider: model.provider,
+        modelId: modelId,
+        apiKey: apiKey,
+        baseUrl: model.baseUrl,
+        systemPrompt,
+        messageText,
+        conversationHistory
+      })
     });
 
-    if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.text) {
+        return { text: data.text };
+      }
+      if (data.error) throw new Error(data.error);
+    } else {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error?.message || `Gemini API returned status ${res.status}`);
+      throw new Error(errData.error || `Server proxy returned HTTP ${res.status}`);
+    }
+  } catch (proxyErr) {
+    console.warn('Backend proxy attempt failed, falling back to direct browser fetch:', proxyErr.message);
+
+    // 2. Secondary path: Direct Browser Fetch Fallback
+    // A. Google Gemini
+    if (provider.includes('google') || provider.includes('gemini') || modelId.includes('gemini')) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${systemPrompt}\n\nUser Question:\n${messageText}` }]
+          }
+        ]
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `Gemini API returned status ${res.status}`);
+      }
+
+      const data = await res.json();
+      const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!candidateText) throw new Error('No candidate content received from Gemini.');
+      return { text: candidateText };
     }
 
-    const data = await res.json();
-    const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!candidateText) throw new Error('No candidate content received from Gemini.');
-    return { text: candidateText };
-  }
+    // B. Anthropic Claude
+    if (provider.includes('anthropic') || provider.includes('claude')) {
+      const endpoint = 'https://api.anthropic.com/v1/messages';
+      const payload = {
+        model: modelId,
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: messageText }]
+      };
 
-  // 2. Anthropic Claude
-  if (provider.includes('anthropic') || provider.includes('claude')) {
-    const endpoint = 'https://api.anthropic.com/v1/messages';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `Anthropic API returned status ${res.status}`);
+      }
+
+      const data = await res.json();
+      return { text: data.content?.[0]?.text || 'No response from Claude.' };
+    }
+
+    // C. OpenAI / OpenRouter / Custom OpenAI-compatible
+    const baseUrl = model.baseUrl || (provider.includes('openrouter') ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1');
+    const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+
     const payload = {
       model: modelId,
-      max_tokens: 1500,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: messageText }]
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: messageText }
+      ]
     };
 
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(payload)
     });
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error?.message || `Anthropic API returned status ${res.status}`);
+      throw new Error(errData.error?.message || `OpenAI-compatible API returned status ${res.status}`);
     }
 
     const data = await res.json();
-    return { text: data.content?.[0]?.text || 'No response from Claude.' };
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('No completion returned from model.');
+    return { text };
   }
+}
 
-  // 3. OpenAI / OpenRouter / Custom OpenAI-compatible
-  const baseUrl = model.baseUrl || (provider.includes('openrouter') ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1');
-  const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-
-  const payload = {
-    model: modelId,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: messageText }
-    ]
-  };
-
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
+/**
+ * Fetch and discover live models available for this API key
+ */
+export async function fetchProviderModels({ provider, apiKey, baseUrl }) {
+  try {
+    const res = await fetch('/api/ai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, apiKey, baseUrl })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
     const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.error?.message || `OpenAI-compatible API returned status ${res.status}`);
+    throw new Error(errData.error || `Server returned HTTP ${res.status}`);
+  } catch (err) {
+    return { success: false, error: err.message };
   }
-
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('No completion returned from model.');
-  return { text };
 }
 
 /**
@@ -228,7 +280,7 @@ function executeLocalRagSynthesis({ messageText, model, connectedFiles, spaceNam
     content: text,
     reasoningTime: `${elapsed}s`,
     isLiveApi: false,
-    modelName: model.name,
+    modelName: model?.name || 'AI Model',
     citations
   };
 }

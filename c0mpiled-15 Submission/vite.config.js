@@ -277,6 +277,229 @@ function s3ApiPlugin() {
             }
           }
 
+          // AI Proxy: Fetch & Auto-Detect Models via API
+          if (pathname === '/api/ai/models' && req.method === 'POST') {
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', async () => {
+              try {
+                const data = JSON.parse(body || '{}')
+                const provider = (data.provider || '').toLowerCase()
+                const apiKey = (data.apiKey || '').trim()
+                const baseUrl = data.baseUrl
+
+                if (!apiKey) {
+                  res.statusCode = 400
+                  return res.end(JSON.stringify({ success: false, error: 'API key is required' }))
+                }
+
+                // 1. Google Gemini
+                if (provider.includes('gemini') || provider.includes('google') || apiKey.startsWith('AIza')) {
+                  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+                  const resp = await fetch(url)
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}))
+                    throw new Error(err.error?.message || `Gemini returned HTTP ${resp.status}`)
+                  }
+                  const resJson = await resp.json()
+                  const models = (resJson.models || [])
+                    .map(m => m.name.replace(/^models\//, ''))
+                    .filter(m => m.includes('gemini'))
+                  return res.end(JSON.stringify({
+                    success: true,
+                    provider: 'Google Gemini',
+                    models: models.length > 0 ? models : ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+                    recommendedModel: models.find(m => m.includes('2.0-flash')) || 'gemini-2.0-flash'
+                  }))
+                }
+
+                // 2. Groq
+                if (provider.includes('groq') || apiKey.startsWith('gsk_')) {
+                  const resp = await fetch('https://api.groq.com/openai/v1/models', {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                  })
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}))
+                    throw new Error(err.error?.message || `Groq returned HTTP ${resp.status}`)
+                  }
+                  const resJson = await resp.json()
+                  const models = (resJson.data || []).map(m => m.id).filter(id => !id.includes('whisper'))
+                  return res.end(JSON.stringify({
+                    success: true,
+                    provider: 'Groq',
+                    models,
+                    recommendedModel: models.find(m => m.includes('llama-3.3-70b')) || models[0] || 'llama-3.3-70b-versatile'
+                  }))
+                }
+
+                // 3. Anthropic
+                if (provider.includes('anthropic') || provider.includes('claude') || apiKey.startsWith('sk-ant-')) {
+                  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': apiKey,
+                      'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                      model: 'claude-3-5-haiku-20241022',
+                      max_tokens: 1,
+                      messages: [{ role: 'user', content: 'hi' }]
+                    })
+                  })
+                  if (!resp.ok && resp.status === 401) {
+                    const err = await resp.json().catch(() => ({}))
+                    throw new Error(err.error?.message || 'Invalid Anthropic API Key')
+                  }
+                  return res.end(JSON.stringify({
+                    success: true,
+                    provider: 'Anthropic',
+                    models: [
+                      'claude-3-7-sonnet-20250219',
+                      'claude-3-5-sonnet-20241022',
+                      'claude-3-5-haiku-20241022',
+                      'claude-3-opus-20240229'
+                    ],
+                    recommendedModel: 'claude-3-7-sonnet-20250219'
+                  }))
+                }
+
+                // 4. OpenAI / OpenRouter / Custom
+                const apiBase = baseUrl ? baseUrl.replace(/\/$/, '') : (provider.includes('openrouter') ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1')
+                const resp = await fetch(`${apiBase}/models`, {
+                  headers: { 'Authorization': `Bearer ${apiKey}` }
+                })
+                if (!resp.ok) {
+                  const err = await resp.json().catch(() => ({}))
+                  throw new Error(err.error?.message || `Provider returned HTTP ${resp.status}`)
+                }
+                const resJson = await resp.json()
+                const allData = resJson.data || []
+                let models = allData.map(m => m.id)
+                if (!baseUrl && !provider.includes('openrouter')) {
+                  models = models.filter(id => id.includes('gpt-') || id.startsWith('o1') || id.startsWith('o3'))
+                }
+                return res.end(JSON.stringify({
+                  success: true,
+                  provider: provider.includes('openrouter') ? 'OpenRouter' : 'OpenAI',
+                  models: models.length > 0 ? models.slice(0, 30) : ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'],
+                  recommendedModel: models.find(m => m === 'gpt-4o') || models.find(m => m === 'gpt-4o-mini') || 'gpt-4o'
+                }))
+              } catch (err) {
+                res.statusCode = 400
+                return res.end(JSON.stringify({ success: false, error: err.message }))
+              }
+            })
+            return
+          }
+
+          // AI Proxy: Unified Chat Inference
+          if (pathname === '/api/ai/chat' && req.method === 'POST') {
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', async () => {
+              try {
+                const data = JSON.parse(body || '{}')
+                const provider = (data.provider || '').toLowerCase()
+                const apiKey = (data.apiKey || '').trim()
+                const modelId = data.modelId || 'gpt-4o-mini'
+                const systemPrompt = data.systemPrompt || ''
+                const messageText = data.messageText || ''
+                const baseUrl = data.baseUrl
+
+                if (!apiKey) {
+                  res.statusCode = 400
+                  return res.end(JSON.stringify({ success: false, error: 'API key is required' }))
+                }
+
+                // A. Google Gemini
+                if (provider.includes('gemini') || provider.includes('google') || modelId.includes('gemini')) {
+                  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`
+                  const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      contents: [{
+                        role: 'user',
+                        parts: [{ text: `${systemPrompt}\n\nUser Question:\n${messageText}` }]
+                      }]
+                    })
+                  })
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}))
+                    throw new Error(err.error?.message || `Gemini returned HTTP ${resp.status}`)
+                  }
+                  const resJson = await resp.json()
+                  const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
+                  return res.end(JSON.stringify({ success: true, text }))
+                }
+
+                // B. Anthropic Claude
+                if (provider.includes('anthropic') || provider.includes('claude')) {
+                  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': apiKey,
+                      'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                      model: modelId,
+                      max_tokens: 2000,
+                      system: systemPrompt,
+                      messages: [{ role: 'user', content: messageText }]
+                    })
+                  })
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}))
+                    throw new Error(err.error?.message || `Anthropic returned HTTP ${resp.status}`)
+                  }
+                  const resJson = await resp.json()
+                  const text = resJson.content?.[0]?.text || 'No response generated.'
+                  return res.end(JSON.stringify({ success: true, text }))
+                }
+
+                // C. OpenAI / Groq / OpenRouter / Custom OpenAI-compatible
+                let apiEndpoint = ''
+                if (provider.includes('groq')) {
+                  apiEndpoint = 'https://api.groq.com/openai/v1/chat/completions'
+                } else if (provider.includes('openrouter')) {
+                  apiEndpoint = 'https://openrouter.ai/api/v1/chat/completions'
+                } else if (baseUrl) {
+                  apiEndpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`
+                } else {
+                  apiEndpoint = 'https://api.openai.com/v1/chat/completions'
+                }
+
+                const resp = await fetch(apiEndpoint, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                  },
+                  body: JSON.stringify({
+                    model: modelId,
+                    messages: [
+                      { role: 'system', content: systemPrompt },
+                      { role: 'user', content: messageText }
+                    ]
+                  })
+                })
+                if (!resp.ok) {
+                  const err = await resp.json().catch(() => ({}))
+                  throw new Error(err.error?.message || `Model API returned HTTP ${resp.status}`)
+                }
+                const resJson = await resp.json()
+                const text = resJson.choices?.[0]?.message?.content || 'No completion returned.'
+                return res.end(JSON.stringify({ success: true, text }))
+              } catch (err) {
+                res.statusCode = 500
+                return res.end(JSON.stringify({ success: false, error: err.message }))
+              }
+            })
+            return
+          }
+
           next()
         } catch (e) {
           res.statusCode = 500
