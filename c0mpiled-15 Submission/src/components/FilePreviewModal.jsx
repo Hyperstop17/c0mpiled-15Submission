@@ -22,7 +22,8 @@ import {
   RefreshCw,
   Eye,
   ChevronRight,
-  Cloud
+  Cloud,
+  Share2
 } from 'lucide-react';
 import { marked } from 'marked';
 import { sendChatMessage } from '../services/chatService';
@@ -39,7 +40,8 @@ export default function FilePreviewModal({
   allBots = [],
   onClose, 
   onMountToSpace,
-  onNavigateToSpace
+  onNavigateToSpace,
+  onShareFile
 }) {
   const [copied, setCopied] = useState(false);
   const [showChat, setShowChat] = useState(true);
@@ -254,6 +256,18 @@ export default function FilePreviewModal({
               {copied ? <Check size={15} className="text-green" /> : <Copy size={15} />}
               <span>{copied ? 'Copied' : 'Copy'}</span>
             </button>
+
+            {/* Share Document */}
+            {onShareFile && (
+              <button 
+                className="action-btn-toolbar"
+                onClick={() => onShareFile(file)}
+                title="Share this document with team collaborators"
+              >
+                <Share2 size={15} />
+                <span>Share</span>
+              </button>
+            )}
 
             {/* Download */}
             <button 

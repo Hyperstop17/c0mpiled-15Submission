@@ -62,14 +62,21 @@ export async function sendChatMessage({
 }
 
 /**
- * Format connected file contents into grounded context
+ * Format connected file contents into grounded context (sanitized and token-budgeted)
  */
 function buildRagContext(connectedFiles) {
   if (!connectedFiles || connectedFiles.length === 0) return '';
 
   return connectedFiles.map((file, idx) => {
-    const content = file.content || file.summary || 'No text content available.';
-    return `[DOCUMENT ${idx + 1}: ${file.name} (Storage: ${file.storageProvider || 'Local Drive'})]\n${content}\n`;
+    let raw = file.content || file.summary || 'No text content available.';
+    // Clean base64 data URLs to prevent prompt bloating and API rejection
+    if (typeof raw === 'string') {
+      raw = raw.replace(/data:[^;]+;base64,[A-Za-z0-9+/=]+/g, '[Embedded Media Data]');
+      if (raw.length > 25000) {
+        raw = raw.slice(0, 25000) + '\n... [Context truncated to first 25,000 characters for context window]';
+      }
+    }
+    return `[DOCUMENT ${idx + 1}: ${file.name} (Format: ${file.type || 'text'}, Storage: ${file.storageProvider || 'AWS S3 Cloud'})]\n${raw}\n`;
   }).join('\n----------------------------------------\n\n');
 }
 
@@ -234,46 +241,140 @@ export async function fetchProviderModels({ provider, apiKey, baseUrl }) {
 }
 
 /**
- * Built-in grounded RAG synthesis when running in demo/offline mode
+ * Intelligent grounded RAG synthesis when running in sandbox/local mode
  */
 function executeLocalRagSynthesis({ messageText, model, connectedFiles, spaceName, startTime }) {
-  const elapsed = ((performance.now() - startTime) / 1000 + 0.8).toFixed(1);
+  const elapsed = ((performance.now() - startTime) / 1000 + 0.9).toFixed(1);
   const q = messageText.toLowerCase();
 
   let text = '';
   let citations = [];
 
   if (connectedFiles.length === 0) {
-    text = `I have received your query: *"**${messageText}**"*. \n\nCurrently, there are **no Drive documents mounted** to this space. You can click **"+ Mount Drive Files"** in the drawer or above the prompt bar to attach files from AWS S3, and I will ground all responses directly in your data.`;
-  } else {
-    // Find relevant documents
-    const matchingFiles = connectedFiles.filter(f => {
-      const nameMatch = q.split(' ').some(word => word.length > 3 && f.name.toLowerCase().includes(word));
-      const contentMatch = f.content?.toLowerCase().includes(q) || f.summary?.toLowerCase().includes(q);
-      return nameMatch || contentMatch;
+    text = `I have received your inquiry: **"${messageText}"**.\n\nCurrently, there are **no files mounted** to this collaborative space. Click **"+ Mount File"** at the top or in the files drawer to mount documents from your Drive, and I will analyze them and ground all responses directly in your content.`;
+    return {
+      success: true,
+      content: text,
+      reasoningTime: `${elapsed}s`,
+      isLiveApi: false,
+      modelName: model?.name || 'AI Model',
+      citations: []
+    };
+  }
+
+  // Extract query keywords (excluding common stop words)
+  const stopWords = new Set(['what', 'where', 'when', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'have', 'from', 'with', 'about', 'your', 'please', 'explain', 'show', 'tell', 'does', 'will', 'would', 'could', 'should', 'the', 'and', 'for', 'are']);
+  const queryWords = q
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !stopWords.has(w));
+
+  // Score each mounted file based on keyword matches in content & name
+  const fileScores = connectedFiles.map(f => {
+    const rawContent = (f.content || f.summary || '').toLowerCase();
+    let score = 0;
+    const matchedExcerpts = [];
+
+    // Check query word hits
+    queryWords.forEach(word => {
+      if (f.name.toLowerCase().includes(word)) score += 5;
+      const count = (rawContent.match(new RegExp(`\\b${word}\\b`, 'g')) || []).length;
+      score += Math.min(count * 2, 20);
     });
 
-    const primaryFiles = matchingFiles.length > 0 ? matchingFiles : connectedFiles;
+    // Extract relevant sentences or lines
+    const lines = (f.content || f.summary || '').split('\n').filter(Boolean);
+    lines.forEach(line => {
+      const lineLower = line.toLowerCase();
+      const hits = queryWords.filter(w => lineLower.includes(w)).length;
+      if (hits > 0 && line.length > 20 && !line.startsWith('data:')) {
+        matchedExcerpts.push({ line: line.trim(), hits });
+      }
+    });
 
-    text = `Grounded synthesis for #${spaceName} using **${primaryFiles.length} mounted file(s)**:\n\n`;
+    matchedExcerpts.sort((a, b) => b.hits - a.hits);
 
-    primaryFiles.slice(0, 3).forEach((file, i) => {
-      text += `### ${i + 1}. Insights from \`${file.name}\`\n`;
+    return {
+      file: f,
+      score: score > 0 ? score : 1,
+      topExcerpts: matchedExcerpts.slice(0, 3).map(e => e.line)
+    };
+  });
+
+  // Sort files by relevance
+  fileScores.sort((a, b) => b.score - a.score);
+  const primaryResults = fileScores.slice(0, 3);
+
+  // Check intent
+  const isSummary = /summar|overview|brief|tldr|about|explain/i.test(q);
+  const isCodeOrTech = /code|function|class|method|bug|error|test|script/i.test(q);
+  const isTabular = /data|table|row|column|metric|revenue|number|count|sales/i.test(q);
+
+  text = `Based on the **${connectedFiles.length} file(s)** mounted to **#${spaceName}**, here is the grounded analysis for your inquiry:\n\n`;
+
+  if (isSummary) {
+    text += `### Executive Summary\n`;
+    primaryResults.forEach(({ file, topExcerpts }) => {
+      text += `**${file.name}** (${file.type.toUpperCase()} • ${file.size || 'Document'}):\n`;
       if (file.summary) {
         text += `> ${file.summary}\n\n`;
       }
-      text += `* **Status**: Indexed & RAG-ready in AWS S3.\n`;
-      text += `* **Key Context**: Scanned ${file.tokens ? file.tokens.toLocaleString() : '1,500'} tokens for semantic relevance.\n\n`;
+      if (topExcerpts.length > 0) {
+        text += `*Key Points Extracted:*\n`;
+        topExcerpts.forEach(ex => {
+          text += `- ${ex.slice(0, 180)}${ex.length > 180 ? '...' : ''}\n`;
+        });
+        text += `\n`;
+      }
+    });
+  } else if (isCodeOrTech && primaryResults.some(r => r.file.type === 'code')) {
+    text += `### Code & Technical Context\n`;
+    primaryResults.filter(r => r.file.type === 'code').forEach(({ file, topExcerpts }) => {
+      text += `Found relevant implementations in \`${file.name}\`:\n`;
+      if (topExcerpts.length > 0) {
+        text += `\`\`\`${file.name.split('.').pop() || 'text'}\n`;
+        text += topExcerpts.join('\n').slice(0, 600) + '\n';
+        text += `\`\`\`\n\n`;
+      }
+    });
+  } else if (isTabular && primaryResults.some(r => r.file.type === 'csv')) {
+    text += `### Tabular Data Findings\n`;
+    primaryResults.filter(r => r.file.type === 'csv').forEach(({ file, topExcerpts }) => {
+      text += `Spreadsheet \`${file.name}\`:\n`;
+      if (topExcerpts.length > 0) {
+        topExcerpts.forEach(ex => text += `- \`${ex.slice(0, 140)}\`\n`);
+        text += `\n`;
+      }
+    });
+  } else {
+    // Specific question answering
+    text += `### Direct Findings\n`;
+    let foundSpecifics = false;
+
+    primaryResults.forEach(({ file, topExcerpts }) => {
+      if (topExcerpts.length > 0) {
+        foundSpecifics = true;
+        text += `From **\`${file.name}\`**:\n`;
+        topExcerpts.forEach(ex => {
+          text += `> "${ex.slice(0, 240)}${ex.length > 240 ? '...' : ''}"\n\n`;
+        });
+      }
     });
 
-    text += `*Note: To run live multi-turn inference with real foundation models (GPT-4o, Claude 3.7, or Gemini 2.5), connect your API key under **AI Models** or in the active model selector.*`;
-
-    citations = primaryFiles.slice(0, 2).map(f => ({
-      fileId: f.id,
-      fileName: f.name,
-      excerpt: f.summary || `Grounded from ${f.name} stored in S3`
-    }));
+    if (!foundSpecifics) {
+      primaryResults.forEach(({ file }) => {
+        text += `In **\`${file.name}\`**, the primary context indicates:\n`;
+        text += `> ${file.summary || (file.content || '').slice(0, 200)}...\n\n`;
+      });
+    }
   }
+
+  // Citations
+  citations = primaryResults.map(({ file, topExcerpts }) => ({
+    fileId: file.id,
+    fileName: file.name,
+    excerpt: topExcerpts[0] || file.summary || `Extracted from ${file.name}`
+  }));
 
   return {
     success: true,

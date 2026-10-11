@@ -277,6 +277,161 @@ function s3ApiPlugin() {
             }
           }
 
+          // Team Collaborators Directory
+          if (pathname === '/api/collaborators' && req.method === 'GET') {
+            const collaborators = [
+              { id: 'damien-k', name: 'Damien K.', email: 'damien.dev@cognidrive.local', role: 'Owner', title: 'Lead AI Engineer', avatar: 'DK', color: '#0b57d0', status: 'Online' },
+              { id: 'selena-chang', name: 'Selena Chang', email: 'selena.chang@amazon.com', role: 'Editor', title: 'Senior Cloud Solutions Architect', avatar: 'SC', color: '#1a73e8', status: 'Online' },
+              { id: 'marcus-vance', name: 'Marcus Vance', email: 'marcus.vance@cognidrive.io', role: 'Editor', title: 'Principal AI Researcher', avatar: 'MV', color: '#7c3aed', status: 'Away' },
+              { id: 'elena-rostova', name: 'Elena Rostova', email: 'elena.rostova@cognidrive.io', role: 'Commenter', title: 'Product Design Lead', avatar: 'ER', color: '#ea4335', status: 'Active' },
+              { id: 'alex-rivera', name: 'Alex Rivera', email: 'alex.rivera@cognidrive.io', role: 'Viewer', title: 'Security & Compliance Specialist', avatar: 'AR', color: '#34a853', status: 'Active' }
+            ];
+            return res.end(JSON.stringify({ success: true, collaborators }))
+          }
+
+          // Resource Sharing: Retrieve permissions from S3
+          if (pathname === '/api/s3/share' && req.method === 'GET') {
+            const resourceType = url.searchParams.get('resourceType') || 'file'
+            const resourceId = url.searchParams.get('resourceId')
+            if (!resourceId) {
+              res.statusCode = 400
+              return res.end(JSON.stringify({ error: 'Missing resourceId parameter' }))
+            }
+            const shareKey = `shared/${resourceType}_${resourceId}.json`
+            try {
+              const result = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: shareKey }))
+              const content = await result.Body.transformToString()
+              return res.end(JSON.stringify({ success: true, shareConfig: JSON.parse(content) }))
+            } catch (err) {
+              return res.end(JSON.stringify({
+                success: true,
+                shareConfig: {
+                  resourceType,
+                  resourceId,
+                  generalAccess: 'restricted',
+                  linkRole: 'Viewer',
+                  sharedWith: []
+                }
+              }))
+            }
+          }
+
+          // Resource Sharing: Save permissions & provision collaborator S3 profiles
+          if (pathname === '/api/s3/share' && req.method === 'POST') {
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', async () => {
+              try {
+                const data = JSON.parse(body || '{}')
+                const resourceType = data.resourceType || 'file'
+                const resourceId = data.resourceId
+                if (!resourceId) {
+                  res.statusCode = 400
+                  return res.end(JSON.stringify({ error: 'Missing resourceId' }))
+                }
+
+                const shareKey = `shared/${resourceType}_${resourceId}.json`
+                const shareRecord = {
+                  resourceType,
+                  resourceId,
+                  resourceName: data.resourceName || 'Resource',
+                  ownerId: data.ownerId || 'damien-k',
+                  sharedWith: data.sharedWith || [],
+                  generalAccess: data.generalAccess || 'restricted',
+                  linkRole: data.linkRole || 'Viewer',
+                  updatedAt: new Date().toISOString()
+                }
+
+                // Persist share record in AWS S3
+                await s3Client.send(new PutObjectCommand({
+                  Bucket: BUCKET_NAME,
+                  Key: shareKey,
+                  Body: JSON.stringify(shareRecord, null, 2),
+                  ContentType: 'application/json'
+                }))
+
+                // Provision fake collaborator profiles in AWS S3 if they don't already exist
+                for (const collab of (data.sharedWith || [])) {
+                  const collabUserId = (collab.id || collab.email || 'collab').replace(/[^a-zA-Z0-9_-]/g, '_')
+                  const collabStateKey = `users/${collabUserId}/state.json`
+                  try {
+                    await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: collabStateKey }))
+                  } catch (e) {
+                    const initialCollabState = {
+                      files: [],
+                      folders: [
+                        { id: 'fld-shared', name: 'Shared with Me', color: '#1a73e8' },
+                        { id: 'fld-collab', name: 'Team Collaboration', color: '#34a853' }
+                      ],
+                      spaces: [
+                        {
+                          id: `space-collab-${collabUserId}`,
+                          name: `${collab.name?.split(' ')[0] || 'Team'} Collaboration Room`,
+                          description: `Shared workspace for ${collab.name || 'Team member'} and Damien K.`,
+                          activeBots: ['bot-gemini'],
+                          messages: [
+                            {
+                              id: `m-init-${Date.now()}`,
+                              senderType: 'ai',
+                              botId: 'bot-gemini',
+                              author: 'Gemini 3.8 Flash',
+                              avatar: '⚡',
+                              timestamp: 'Just now',
+                              content: `Welcome to CogniDrive, ${collab.name || 'collaborator'}! Damien K. has shared **${data.resourceName || 'items'}** with you.`
+                            }
+                          ]
+                        }
+                      ],
+                      savedAt: Date.now()
+                    }
+
+                    await s3Client.send(new PutObjectCommand({
+                      Bucket: BUCKET_NAME,
+                      Key: collabStateKey,
+                      Body: JSON.stringify(initialCollabState, null, 2),
+                      ContentType: 'application/json'
+                    }))
+                  }
+
+                  // Update collaborator's shared-with-me index in S3
+                  const sharedWithMeKey = `users/${collabUserId}/shared-with-me.json`
+                  let existingShared = []
+                  try {
+                    const existingRes = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: sharedWithMeKey }))
+                    existingShared = JSON.parse(await existingRes.Body.transformToString())
+                  } catch (e) {}
+
+                  const filtered = existingShared.filter(item => !(item.resourceType === resourceType && item.resourceId === resourceId))
+                  filtered.push({
+                    resourceType,
+                    resourceId,
+                    resourceName: data.resourceName || 'Resource',
+                    role: collab.role || 'Viewer',
+                    sharedBy: data.ownerId || 'Damien K.',
+                    sharedAt: new Date().toISOString()
+                  })
+
+                  await s3Client.send(new PutObjectCommand({
+                    Bucket: BUCKET_NAME,
+                    Key: sharedWithMeKey,
+                    Body: JSON.stringify(filtered, null, 2),
+                    ContentType: 'application/json'
+                  }))
+                }
+
+                return res.end(JSON.stringify({
+                  success: true,
+                  shareKey,
+                  shareConfig: shareRecord
+                }))
+              } catch (err) {
+                res.statusCode = 500
+                return res.end(JSON.stringify({ success: false, error: err.message }))
+              }
+            })
+            return
+          }
+
           // AI Proxy: Fetch & Auto-Detect Models via API
           if (pathname === '/api/ai/models' && req.method === 'POST') {
             let body = ''
@@ -296,7 +451,7 @@ function s3ApiPlugin() {
                 // 1. Google Gemini
                 if (provider.includes('gemini') || provider.includes('google') || apiKey.startsWith('AIza')) {
                   const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-                  const resp = await fetch(url)
+                  const resp = await fetch(url, { signal: AbortSignal.timeout(20000) })
                   if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}))
                     throw new Error(err.error?.message || `Gemini returned HTTP ${resp.status}`)
@@ -316,7 +471,8 @@ function s3ApiPlugin() {
                 // 2. Groq
                 if (provider.includes('groq') || apiKey.startsWith('gsk_')) {
                   const resp = await fetch('https://api.groq.com/openai/v1/models', {
-                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                    signal: AbortSignal.timeout(20000)
                   })
                   if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}))
@@ -345,7 +501,8 @@ function s3ApiPlugin() {
                       model: 'claude-3-5-haiku-20241022',
                       max_tokens: 1,
                       messages: [{ role: 'user', content: 'hi' }]
-                    })
+                    }),
+                    signal: AbortSignal.timeout(20000)
                   })
                   if (!resp.ok && resp.status === 401) {
                     const err = await resp.json().catch(() => ({}))
@@ -367,7 +524,8 @@ function s3ApiPlugin() {
                 // 4. OpenAI / OpenRouter / Custom
                 const apiBase = baseUrl ? baseUrl.replace(/\/$/, '') : (provider.includes('openrouter') ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1')
                 const resp = await fetch(`${apiBase}/models`, {
-                  headers: { 'Authorization': `Bearer ${apiKey}` }
+                  headers: { 'Authorization': `Bearer ${apiKey}` },
+                  signal: AbortSignal.timeout(20000)
                 })
                 if (!resp.ok) {
                   const err = await resp.json().catch(() => ({}))
@@ -414,17 +572,55 @@ function s3ApiPlugin() {
 
                 // A. Google Gemini
                 if (provider.includes('gemini') || provider.includes('google') || modelId.includes('gemini')) {
-                  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`
-                  const resp = await fetch(url, {
+                  const cleanModel = (modelId || 'gemini-2.0-flash').replace(/^models\//, '')
+                  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`
+                  
+                  // Construct payload with system_instruction and conversation history
+                  const historyContents = (data.conversationHistory || [])
+                    .slice(-6)
+                    .filter(m => m.content && (m.senderType === 'human' || m.senderType === 'ai'))
+                    .map(m => ({
+                      role: m.senderType === 'human' ? 'user' : 'model',
+                      parts: [{ text: m.content }]
+                    }))
+
+                  const geminiPayload = {
+                    system_instruction: {
+                      parts: [{ text: systemPrompt }]
+                    },
+                    contents: [
+                      ...historyContents,
+                      {
+                        role: 'user',
+                        parts: [{ text: messageText }]
+                      }
+                    ]
+                  }
+
+                  let resp = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      contents: [{
-                        role: 'user',
-                        parts: [{ text: `${systemPrompt}\n\nUser Question:\n${messageText}` }]
-                      }]
-                    })
+                    body: JSON.stringify(geminiPayload),
+                    signal: AbortSignal.timeout(20000)
                   })
+
+                  // If system_instruction is not supported on older model endpoints, fallback
+                  if (!resp.ok && resp.status === 400) {
+                    resp = await fetch(url, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        contents: [
+                          {
+                            role: 'user',
+                            parts: [{ text: `${systemPrompt}\n\nUser Question:\n${messageText}` }]
+                          }
+                        ]
+                      }),
+                      signal: AbortSignal.timeout(20000)
+                    })
+                  }
+
                   if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}))
                     throw new Error(err.error?.message || `Gemini returned HTTP ${resp.status}`)
@@ -436,6 +632,14 @@ function s3ApiPlugin() {
 
                 // B. Anthropic Claude
                 if (provider.includes('anthropic') || provider.includes('claude')) {
+                  const historyMsgs = (data.conversationHistory || [])
+                    .slice(-6)
+                    .filter(m => m.content && (m.senderType === 'human' || m.senderType === 'ai'))
+                    .map(m => ({
+                      role: m.senderType === 'human' ? 'user' : 'assistant',
+                      content: m.content
+                    }))
+
                   const resp = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -445,10 +649,14 @@ function s3ApiPlugin() {
                     },
                     body: JSON.stringify({
                       model: modelId,
-                      max_tokens: 2000,
+                      max_tokens: 2500,
                       system: systemPrompt,
-                      messages: [{ role: 'user', content: messageText }]
-                    })
+                      messages: [
+                        ...historyMsgs,
+                        { role: 'user', content: messageText }
+                      ]
+                    }),
+                    signal: AbortSignal.timeout(20000)
                   })
                   if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}))
@@ -471,6 +679,14 @@ function s3ApiPlugin() {
                   apiEndpoint = 'https://api.openai.com/v1/chat/completions'
                 }
 
+                const openAiHistory = (data.conversationHistory || [])
+                  .slice(-6)
+                  .filter(m => m.content && (m.senderType === 'human' || m.senderType === 'ai'))
+                  .map(m => ({
+                    role: m.senderType === 'human' ? 'user' : 'assistant',
+                    content: m.content
+                  }))
+
                 const resp = await fetch(apiEndpoint, {
                   method: 'POST',
                   headers: {
@@ -481,9 +697,11 @@ function s3ApiPlugin() {
                     model: modelId,
                     messages: [
                       { role: 'system', content: systemPrompt },
+                      ...openAiHistory,
                       { role: 'user', content: messageText }
                     ]
-                  })
+                  }),
+                  signal: AbortSignal.timeout(20000)
                 })
                 if (!resp.ok) {
                   const err = await resp.json().catch(() => ({}))

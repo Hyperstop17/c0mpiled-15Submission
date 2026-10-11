@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Search, 
@@ -18,10 +18,22 @@ export default function ConnectFilesModal({
   onSaveConnections,
   onSave
 }) {
-  const [selectedFileIds, setSelectedFileIds] = useState(
-    new Set(space?.connectedFileIds || [])
-  );
+  const [selectedFileIds, setSelectedFileIds] = useState(() => {
+    const initial = new Set(space?.connectedFileIds || []);
+    allFiles.forEach(f => {
+      if (f.connectedSpaces?.includes(space?.id)) initial.add(f.id);
+    });
+    return initial;
+  });
   const [filterQuery, setFilterQuery] = useState('');
+
+  useEffect(() => {
+    const ids = new Set(space?.connectedFileIds || []);
+    allFiles.forEach(f => {
+      if (f.connectedSpaces?.includes(space?.id)) ids.add(f.id);
+    });
+    setSelectedFileIds(ids);
+  }, [space?.id, space?.connectedFileIds]);
 
   const toggleFile = (fileId) => {
     const next = new Set(selectedFileIds);

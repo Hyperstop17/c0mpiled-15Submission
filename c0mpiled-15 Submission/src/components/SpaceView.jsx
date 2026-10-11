@@ -26,7 +26,8 @@ import {
   MessageSquare,
   Key,
   Cpu,
-  Cloud
+  Cloud,
+  Trash2
 } from 'lucide-react';
 import { sendChatMessage } from '../services/chatService';
 
@@ -43,7 +44,9 @@ export default function SpaceView({
   onOpenFile,
   onSaveArtifactToDrive,
   onOpenConnectModal,
-  onOpenAddModel
+  onOpenAddModel,
+  onDeleteSpace,
+  onShareSpace
 }) {
   const [inputText, setInputText] = useState('');
   const [selectedBotId, setSelectedBotId] = useState(space.activeBots?.[0] || allBots[0]?.id || 'bot-gemini');
@@ -66,8 +69,10 @@ export default function SpaceView({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [space.messages, isGenerating]);
 
-  // Connected files for this space
-  const connectedFiles = (allFiles || []).filter(f => space.connectedFileIds?.includes(f.id));
+  // Connected files for this space (checks both space.connectedFileIds and file.connectedSpaces)
+  const connectedFiles = (allFiles || []).filter(f => 
+    space.connectedFileIds?.includes(f.id) || f.connectedSpaces?.includes(space.id)
+  );
   
   // Total tokens in mounted files
   const totalMountedTokens = connectedFiles.reduce((sum, f) => sum + (f.tokens || 0), 0);
@@ -217,6 +222,28 @@ export default function SpaceView({
             <Plus size={15} />
             <span>Mount File</span>
           </button>
+
+          {onShareSpace && (
+            <button 
+              className="btn-share-space-header"
+              onClick={() => onShareSpace(space)}
+              title="Share this chat space with collaborators"
+            >
+              <Share2 size={15} />
+              <span>Share</span>
+            </button>
+          )}
+
+          {onDeleteSpace && (
+            <button 
+              className="btn-delete-space-header"
+              onClick={() => onDeleteSpace(space.id)}
+              title="Delete this chat space"
+            >
+              <Trash2 size={15} />
+              <span>Delete Space</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -406,45 +433,20 @@ export default function SpaceView({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick Example Suggestions */}
-          <div className="space-prompts-bar">
-            <span className="prompts-label">Try example:</span>
-            <button 
-              className="prompt-chip" 
-              onClick={() => applySuggestedPrompt("Summarize key points from my mounted files")}
-            >
-              "Summarize key points from mounted files"
-            </button>
-            <button 
-              className="prompt-chip" 
-              onClick={() => applySuggestedPrompt("What are the main risks and operational action items in these documents?")}
-            >
-              "Extract risks & action items"
-            </button>
-            {connectedFiles.length === 0 && (
-              <button 
-                className="prompt-chip highlight" 
-                onClick={() => onOpenConnectModal && onOpenConnectModal(space?.id)}
-              >
-                + Mount a file to ground answers
-              </button>
-            )}
-          </div>
-
           {/* Bottom Chat Prompt Box */}
           <div className="space-input-box">
             <div className="input-toolbar-top">
-              {/* Bot Selector */}
-              <div className="bot-selector-wrap">
-                <span className="model-label">Model:</span>
+              {/* Prominent Aligned Model Selector */}
+              <div className="bot-selector-wrap prominent">
+                <span className="model-label">AI Model:</span>
                 <select 
                   value={selectedBotId} 
                   onChange={(e) => setSelectedBotId(e.target.value)}
-                  className="model-select"
+                  className="model-select enlarged"
                 >
                   {allBots.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.avatar} {b.name} ({b.provider}) {b.apiKey ? '• 🟢 Live' : ''}
+                      {b.avatar} {b.name} ({b.provider}) {b.apiKey ? '• 🟢 Live API' : ''}
                     </option>
                   ))}
                 </select>
@@ -452,12 +454,12 @@ export default function SpaceView({
                 {onOpenAddModel && (
                   <button 
                     type="button" 
-                    className="btn-add-model-quick" 
+                    className="btn-add-model-quick enlarged" 
                     onClick={onOpenAddModel}
-                    title="Add custom model or API key"
+                    title="Connect API Key or Add Custom Model"
                   >
-                    <Plus size={13} />
-                    <span>API Key</span>
+                    <Plus size={15} />
+                    <span>Connect Key</span>
                   </button>
                 )}
               </div>

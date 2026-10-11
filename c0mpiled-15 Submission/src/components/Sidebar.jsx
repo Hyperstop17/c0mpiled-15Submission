@@ -12,7 +12,8 @@ import {
   ChevronDown,
   Upload,
   FolderPlus,
-  Cloud
+  Cloud,
+  Trash2
 } from 'lucide-react';
 
 export default function Sidebar({
@@ -30,7 +31,8 @@ export default function Sidebar({
   onOpenUpload,
   onOpenNewSpaceModal,
   onOpenUploadModal,
-  onOpenAddModelModal
+  onOpenAddModelModal,
+  onDeleteSpace
 }) {
   const [showNewMenu, setShowNewMenu] = useState(false);
   const [spacesOpen, setSpacesOpen] = useState(true);
@@ -126,20 +128,36 @@ export default function Sidebar({
               const isSelected = currentView === 'space' && selectedSpaceId === sp.id;
               const connectedCount = sp.connectedFileIds?.length || 0;
               return (
-                <button
+                <div
                   key={sp.id}
-                  className={`space-nav-item ${isSelected ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedSpaceId(sp.id);
-                    setCurrentView('space');
-                  }}
+                  className={`space-nav-item-wrapper ${isSelected ? 'active' : ''}`}
                 >
-                  <MessageSquare size={16} className="space-icon" />
-                  <span className="space-title-text">{sp.name}</span>
-                  {connectedCount > 0 && (
-                    <span className="space-file-tag">{connectedCount}</span>
+                  <button
+                    className={`space-nav-item ${isSelected ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedSpaceId(sp.id);
+                      setCurrentView('space');
+                    }}
+                  >
+                    <MessageSquare size={16} className="space-icon" />
+                    <span className="space-title-text">{sp.name}</span>
+                    {connectedCount > 0 && (
+                      <span className="space-file-tag">{connectedCount}</span>
+                    )}
+                  </button>
+                  {onDeleteSpace && (
+                    <button
+                      className="btn-delete-space-sidebar"
+                      title={`Delete #${sp.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteSpace(sp.id);
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>

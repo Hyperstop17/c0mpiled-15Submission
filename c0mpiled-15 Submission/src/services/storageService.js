@@ -30,8 +30,10 @@ export function getCleanUserId(userOrId) {
   return String(userOrId).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+let cloudSyncTimeout = null;
+
 /**
- * Persist user workspace state (files, folders, spaces, models) both locally and in AWS S3
+ * Persist user workspace state (files, folders, spaces, models) both locally and in AWS S3 with debouncing
  */
 export async function saveUserStateToCloud(userOrId, state) {
   const userId = getCleanUserId(userOrId);
@@ -47,26 +49,36 @@ export async function saveUserStateToCloud(userOrId, state) {
     console.warn('LocalStorage save failed:', err);
   }
 
-  // 2. Direct AWS S3 cloud synchronization
-  try {
-    const res = await fetch('/api/s3/user-state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        state: {
-          ...state,
-          savedAt: Date.now()
-        }
-      })
-    });
-    if (res.ok) {
-      return await res.json();
+  // 2. Debounced AWS S3 cloud synchronization (800ms throttle to prevent network contention)
+  return new Promise((resolve) => {
+    if (cloudSyncTimeout) {
+      clearTimeout(cloudSyncTimeout);
     }
-  } catch (err) {
-    console.warn('S3 cloud state sync error:', err);
-  }
-  return { success: true, localOnly: true };
+
+    cloudSyncTimeout = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/s3/user-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId,
+            state: {
+              ...state,
+              savedAt: Date.now()
+            }
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          resolve(data);
+          return;
+        }
+      } catch (err) {
+        console.warn('S3 cloud state sync error:', err);
+      }
+      resolve({ success: true, localOnly: true });
+    }, 800);
+  });
 }
 
 /**

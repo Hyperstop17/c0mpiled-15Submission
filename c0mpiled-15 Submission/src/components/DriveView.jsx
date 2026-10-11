@@ -23,7 +23,8 @@ import {
   FolderPlus,
   FilePlus,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  Share2
 } from 'lucide-react';
 
 export default function DriveView({
@@ -37,10 +38,14 @@ export default function DriveView({
   onCreateFolder,
   onDeleteFolder,
   onCreateNewDocument,
+  onOpenSpace,
+  onDeleteSpace,
+  onOpenNewSpace,
+  onShareItem,
   searchQuery = ''
 }) {
   const [selectedFolder, setSelectedFolder] = useState(null);
-  const [typeFilter, setTypeFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'documents', 'spaces', 'csv', 'code', 'pdf', 'image'
   const [viewMode, setViewMode] = useState('table'); // 'table' or 'grid'
 
   // Context Menu State
@@ -48,7 +53,7 @@ export default function DriveView({
     isOpen: false,
     x: 0,
     y: 0,
-    type: 'canvas', // 'file', 'folder', 'canvas'
+    type: 'canvas', // 'file', 'folder', 'space', 'canvas'
     item: null
   });
 
@@ -77,7 +82,7 @@ export default function DriveView({
   }, []);
 
   // Filter files based on folder, type filter, and search query
-  const filteredFiles = (files || []).filter(file => {
+  const filteredFiles = (typeFilter === 'spaces') ? [] : (files || []).filter(file => {
     if (selectedFolder && file.folder !== selectedFolder) return false;
     
     if (typeFilter !== 'all') {
@@ -97,6 +102,15 @@ export default function DriveView({
     }
     return true;
   });
+
+  // Filter spaces (treated as first-class workspace items in Drive)
+  const filteredSpaces = (typeFilter === 'all' || typeFilter === 'spaces') && !selectedFolder ? (spaces || []).filter(sp => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return sp.name.toLowerCase().includes(q) || sp.description?.toLowerCase().includes(q);
+    }
+    return true;
+  }) : [];
 
   const getFileIcon = (type) => {
     switch (type) {
@@ -148,9 +162,21 @@ export default function DriveView({
     });
   };
 
+  const handleSpaceContextMenu = (e, space) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      isOpen: true,
+      x: Math.min(e.clientX, window.innerWidth - 220),
+      y: Math.min(e.clientY, window.innerHeight - 240),
+      type: 'space',
+      item: space
+    });
+  };
+
   const handleCanvasContextMenu = (e) => {
     // Only trigger if right-clicking background
-    if (e.target.closest('.file-row') || e.target.closest('.folder-card') || e.target.closest('.file-grid-card')) {
+    if (e.target.closest('.file-row') || e.target.closest('.folder-card') || e.target.closest('.file-grid-card') || e.target.closest('.space-row') || e.target.closest('.space-grid-card')) {
       return;
     }
     e.preventDefault();
@@ -223,6 +249,17 @@ export default function DriveView({
             <span>New Doc</span>
           </button>
 
+          {onOpenNewSpace && (
+            <button 
+              className="btn-new-space-action"
+              onClick={onOpenNewSpace}
+              title="Create a collaborative chat space"
+            >
+              <MessageSquare size={15} />
+              <span>New Space</span>
+            </button>
+          )}
+
           <div className="view-mode-toggle">
             <button 
               className={`mode-btn ${viewMode === 'table' ? 'active' : ''}`}
@@ -278,7 +315,13 @@ export default function DriveView({
             className={`filter-pill ${typeFilter === 'all' ? 'active' : ''}`}
             onClick={() => setTypeFilter('all')}
           >
-            All Files
+            All Items ({files.length + spaces.length})
+          </button>
+          <button 
+            className={`filter-pill ${typeFilter === 'spaces' ? 'active' : ''}`}
+            onClick={() => setTypeFilter('spaces')}
+          >
+            Chat Spaces ({spaces.length})
           </button>
           <button 
             className={`filter-pill ${typeFilter === 'documents' ? 'active' : ''}`}
@@ -335,14 +378,100 @@ export default function DriveView({
               </tr>
             </thead>
             <tbody>
-              {filteredFiles.length === 0 ? (
+              {filteredFiles.length === 0 && filteredSpaces.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="empty-files-row">
-                    No files found matching the criteria. Right-click or click "Upload Document" to add files.
+                    No files or spaces found matching the criteria. Right-click or use the action buttons to create folders, documents, or chat spaces.
                   </td>
                 </tr>
               ) : (
-                filteredFiles.map(file => (
+                <>
+                  {/* First-Class Chat Spaces */}
+                  {filteredSpaces.map(sp => (
+                    <tr 
+                      key={sp.id} 
+                      className="file-row space-row"
+                      onContextMenu={(e) => handleSpaceContextMenu(e, sp)}
+                    >
+                      <td className="col-filename" onClick={() => onOpenSpace && onOpenSpace(sp.id)}>
+                        <div className="file-name-cell">
+                          <div className="space-icon-badge">
+                            <MessageSquare className="file-icon text-cyan" size={18} />
+                          </div>
+                          <div>
+                            <div className="file-title-text" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontWeight: 600 }}>#{sp.name}</span>
+                              <span className="badge-space-tag">AI Chat Space</span>
+                            </div>
+                            <div className="file-author-sub">{sp.description || 'Collaborative chat space'}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="badge-grounded space-storage" title="Collaborative Workspace">
+                          <MessageSquare size={13} className="text-cyan" />
+                          <span>Live Space</span>
+                        </span>
+                      </td>
+                      <td>
+                        <div className="token-metric-pill" title="Connected files count">
+                          <Sparkles size={11} className="text-amber" />
+                          <span>{sp.connectedFileIds?.length || 0} mounted files</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="folder-tag space-folder">Chat Spaces</span>
+                      </td>
+                      <td>
+                        <div className="spaces-chips-wrap">
+                          <span className="space-chip active">
+                            {(sp.messages || []).length} messages
+                          </span>
+                        </div>
+                      </td>
+                      <td className="col-date">Active</td>
+                      <td className="col-actions">
+                        <div className="file-row-actions">
+                          <button 
+                            className="action-btn-sm btn-open-file" 
+                            title="Open Chat Space"
+                            onClick={() => onOpenSpace && onOpenSpace(sp.id)}
+                          >
+                            <Eye size={14} />
+                            <span>Open</span>
+                          </button>
+                          <button 
+                            className="action-btn-sm" 
+                            title="Mount Files to Space"
+                            onClick={() => onConnectFileToSpace && onConnectFileToSpace(sp.id)}
+                          >
+                            <Plus size={13} />
+                          </button>
+                          {onShareItem && (
+                            <button 
+                              className="action-btn-sm" 
+                              title="Share Chat Space"
+                              onClick={() => onShareItem(sp, 'space')}
+                            >
+                              <Share2 size={13} className="text-cyan" />
+                            </button>
+                          )}
+                          {onDeleteSpace && (
+                            <button 
+                              className="action-btn-sm danger" 
+                              title="Delete Space"
+                              onClick={() => onDeleteSpace(sp.id)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {/* Documents & Files */}
+                  {filteredFiles.map(file => (
                   <tr 
                     key={file.id} 
                     className="file-row"
@@ -413,6 +542,15 @@ export default function DriveView({
                         >
                           <Link2 size={13} />
                         </button>
+                        {onShareItem && (
+                          <button 
+                            className="action-btn-sm" 
+                            title="Share Document"
+                            onClick={() => onShareItem(file, 'file')}
+                          >
+                            <Share2 size={13} className="text-blue" />
+                          </button>
+                        )}
                         <button 
                           className="action-btn-sm danger" 
                           title="Delete File"
@@ -423,14 +561,80 @@ export default function DriveView({
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
+                ))}
+              </>
+            )}
             </tbody>
           </table>
         </div>
       ) : (
         /* Grid View */
         <div className="files-cards-grid">
+          {filteredFiles.length === 0 && filteredSpaces.length === 0 && (
+            <div className="empty-files-row" style={{ gridColumn: '1 / -1', padding: '32px', textAlign: 'center' }}>
+              No files or spaces found matching the criteria.
+            </div>
+          )}
+
+          {/* First-Class Chat Spaces in Grid View */}
+          {filteredSpaces.map(sp => (
+            <div 
+              key={sp.id} 
+              className="file-grid-card space-grid-card"
+              onContextMenu={(e) => handleSpaceContextMenu(e, sp)}
+            >
+              <div className="grid-card-top">
+                <div className="grid-icon-row">
+                  <div className="space-icon-badge mini">
+                    <MessageSquare size={18} className="text-cyan" />
+                  </div>
+                  <span className="badge-space-tag">AI Chat Space</span>
+                </div>
+                <div className="grid-token-badge">
+                  {sp.connectedFileIds?.length || 0} mounted
+                </div>
+              </div>
+              <div className="grid-card-title" onClick={() => onOpenSpace && onOpenSpace(sp.id)}>
+                #{sp.name}
+              </div>
+              <div className="grid-card-summary" onClick={() => onOpenSpace && onOpenSpace(sp.id)}>
+                {sp.description || 'Collaborative chat space grounded in Drive files.'}
+              </div>
+              <div className="grid-card-footer">
+                <span className="folder-tag space-folder">{(sp.messages || []).length} msgs</span>
+                <div className="grid-actions">
+                  <button 
+                    className="action-btn-sm" 
+                    title="Open Chat Space"
+                    onClick={() => onOpenSpace && onOpenSpace(sp.id)}
+                  >
+                    <Eye size={13} />
+                    <span>Open</span>
+                  </button>
+                  {onShareItem && (
+                    <button 
+                      className="action-btn-sm" 
+                      title="Share Space"
+                      onClick={() => onShareItem(sp, 'space')}
+                    >
+                      <Share2 size={13} className="text-cyan" />
+                    </button>
+                  )}
+                  {onDeleteSpace && (
+                    <button 
+                      className="action-btn-sm danger" 
+                      title="Delete Space"
+                      onClick={() => onDeleteSpace(sp.id)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Documents & Files */}
           {filteredFiles.map(file => (
             <div 
               key={file.id} 
@@ -480,6 +684,15 @@ export default function DriveView({
                   >
                     <Link2 size={13} />
                   </button>
+                  {onShareItem && (
+                    <button 
+                      className="action-btn-sm" 
+                      title="Share Document"
+                      onClick={() => onShareItem(file, 'file')}
+                    >
+                      <Share2 size={13} className="text-blue" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -538,6 +751,18 @@ export default function DriveView({
                 <Download size={15} />
                 <span>Download</span>
               </button>
+              {onShareItem && (
+                <button 
+                  className="context-menu-item"
+                  onClick={() => {
+                    onShareItem(contextMenu.item, 'file');
+                    setContextMenu(p => ({ ...p, isOpen: false }));
+                  }}
+                >
+                  <Share2 size={15} className="text-blue" />
+                  <span>Share Document</span>
+                </button>
+              )}
               <div className="context-menu-divider" />
               <button 
                 className="context-menu-item danger"
@@ -593,9 +818,72 @@ export default function DriveView({
             </>
           )}
 
+          {/* Chat Space Context Menu */}
+          {contextMenu.type === 'space' && contextMenu.item && (
+            <>
+              <div className="context-menu-header">
+                💬 #{contextMenu.item.name}
+              </div>
+              <button 
+                className="context-menu-item"
+                onClick={() => {
+                  if (onOpenSpace) onOpenSpace(contextMenu.item.id);
+                  setContextMenu(p => ({ ...p, isOpen: false }));
+                }}
+              >
+                <Eye size={15} className="text-cyan" />
+                <span>Open Chat Space</span>
+              </button>
+              <button 
+                className="context-menu-item"
+                onClick={() => {
+                  if (onConnectFileToSpace) onConnectFileToSpace(contextMenu.item.id);
+                  setContextMenu(p => ({ ...p, isOpen: false }));
+                }}
+              >
+                <Plus size={15} className="text-indigo" />
+                <span>Mount Files to Space</span>
+              </button>
+              {onShareItem && (
+                <button 
+                  className="context-menu-item"
+                  onClick={() => {
+                    onShareItem(contextMenu.item, 'space');
+                    setContextMenu(p => ({ ...p, isOpen: false }));
+                  }}
+                >
+                  <Share2 size={15} className="text-cyan" />
+                  <span>Share Chat Space</span>
+                </button>
+              )}
+              <div className="context-menu-divider" />
+              {onDeleteSpace && (
+                <button 
+                  className="context-menu-item danger"
+                  onClick={() => {
+                    onDeleteSpace(contextMenu.item.id);
+                    setContextMenu(p => ({ ...p, isOpen: false }));
+                  }}
+                >
+                  <Trash2 size={15} />
+                  <span>Delete Space</span>
+                </button>
+              )}
+            </>
+          )}
+
           {/* Background Canvas Context Menu */}
           {contextMenu.type === 'canvas' && (
             <>
+              {onOpenNewSpace && (
+                <button 
+                  className="context-menu-item"
+                  onClick={() => { onOpenNewSpace(); setContextMenu(p => ({ ...p, isOpen: false })); }}
+                >
+                  <MessageSquare size={15} className="text-cyan" />
+                  <span>New Chat Space</span>
+                </button>
+              )}
               <button 
                 className="context-menu-item"
                 onClick={() => { setIsNewFolderOpen(true); setContextMenu(p => ({ ...p, isOpen: false })); }}

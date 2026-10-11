@@ -10,6 +10,7 @@ import NewSpaceModal from './components/NewSpaceModal';
 import UploadFileModal from './components/UploadFileModal';
 import AccountSettingsModal from './components/AccountSettingsModal';
 import AddModelModal from './components/AddModelModal';
+import ShareModal from './components/ShareModal';
 import LandingView from './components/LandingView';
 
 import { 
@@ -118,6 +119,7 @@ export default function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModelModalOpen, setIsAddModelModalOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState(null); // { item, type: 'file' | 'space' }
   const [toastMessage, setToastMessage] = useState(null);
 
   const showToast = (msg) => {
@@ -472,6 +474,61 @@ export default function App() {
     showToast(`Space "#${newSpace.name}" launched!`);
   };
 
+  // Delete Space
+  const handleDeleteSpace = (spaceId) => {
+    const sp = spaces.find(s => s.id === spaceId);
+    if (!sp) return;
+
+    if (!window.confirm(`Delete chat space "#${sp.name}" and remove it from your workspace?`)) return;
+
+    setSpaces(prev => {
+      const remaining = prev.filter(s => s.id !== spaceId);
+      if (selectedSpaceId === spaceId) {
+        if (remaining.length > 0) {
+          setSelectedSpaceId(remaining[0].id);
+        } else {
+          setCurrentView('drive');
+        }
+      }
+      return remaining;
+    });
+
+    // Unmount space from files
+    setFiles(prev => prev.map(f => ({
+      ...f,
+      connectedSpaces: (f.connectedSpaces || []).filter(id => id !== spaceId)
+    })));
+
+    showToast(`Space "#${sp.name}" deleted.`);
+  };
+
+  // Open Share Dialog
+  const handleOpenShare = (item, type = 'file') => {
+    setShareTarget({ item, type });
+  };
+
+  // Save Shared Permissions & update local state
+  const handleSaveShare = (shareConfig) => {
+    const { resourceType, resourceId, sharedWith, generalAccess, linkRole } = shareConfig;
+    if (resourceType === 'space') {
+      setSpaces(prev => prev.map(sp => {
+        if (sp.id === resourceId) {
+          return { ...sp, sharedWith, generalAccess, linkRole };
+        }
+        return sp;
+      }));
+      showToast(`Shared space settings updated (${sharedWith?.length || 0} collaborators).`);
+    } else {
+      setFiles(prev => prev.map(f => {
+        if (f.id === resourceId) {
+          return { ...f, sharedWith, generalAccess, linkRole };
+        }
+        return f;
+      }));
+      showToast(`Shared file settings updated (${sharedWith?.length || 0} collaborators).`);
+    }
+  };
+
   // If user is not signed in, show modern Landing View
   if (!session) {
     return (
@@ -505,6 +562,7 @@ export default function App() {
           onOpenUploadModal={() => setIsUploadModalOpen(true)}
           onOpenNewSpaceModal={() => setIsNewSpaceModalOpen(true)}
           onOpenAddModelModal={() => setIsAddModelModalOpen(true)}
+          onDeleteSpace={handleDeleteSpace}
           files={files || []}
           filesCount={(files || []).length}
           totalTokens={totalTokens}
@@ -527,9 +585,23 @@ export default function App() {
                   handleSaveConnections(currentSpace.id, [...new Set([...(currentSpace.connectedFileIds || []), file.id])]);
                 }
               }}
+              onConnectFileToSpace={(spaceIdOrFile) => {
+                if (typeof spaceIdOrFile === 'string') {
+                  setConnectModalSpaceId(spaceIdOrFile);
+                } else if (currentSpace) {
+                  handleSaveConnections(currentSpace.id, [...new Set([...(currentSpace.connectedFileIds || []), spaceIdOrFile.id])]);
+                }
+              }}
+              onOpenSpace={(spaceId) => {
+                setSelectedSpaceId(spaceId);
+                setCurrentView('space');
+              }}
+              onDeleteSpace={handleDeleteSpace}
+              onOpenNewSpace={() => setIsNewSpaceModalOpen(true)}
               onCreateFolder={handleCreateFolder}
               onDeleteFolder={handleDeleteFolder}
               onCreateNewDocument={handleCreateNewDocument}
+              onShareItem={handleOpenShare}
             />
           )}
 
@@ -551,6 +623,8 @@ export default function App() {
               onUnmountFile={(fileId) => handleUnmountFile(currentSpace.id, fileId)}
               onSaveArtifact={(artifact, content) => handleSaveArtifactToDrive(currentSpace.id, artifact, content)}
               onOpenAddModel={() => setIsAddModelModalOpen(true)}
+              onDeleteSpace={handleDeleteSpace}
+              onShareSpace={(space) => handleOpenShare(space, 'space')}
             />
           )}
 
@@ -578,6 +652,7 @@ export default function App() {
               handleSaveConnections(currentSpace.id, [...new Set([...(currentSpace.connectedFileIds || []), file.id])]);
             }
           }}
+          onShareFile={(file) => handleOpenShare(file, 'file')}
           allBots={allBots}
         />
       )}
@@ -585,6 +660,7 @@ export default function App() {
       {/* Mount / Connect Files to Space Modal */}
       {connectModalSpaceId && (
         <ConnectFilesModal 
+          key={connectModalSpaceId}
           space={spaces.find(s => s.id === connectModalSpaceId) || currentSpace}
           allFiles={files}
           onClose={() => setConnectModalSpaceId(null)}
@@ -641,6 +717,18 @@ export default function App() {
         onLogout={handleLogout}
         onOpenAddModel={() => setIsAddModelModalOpen(true)}
       />
+
+      {/* Resource Sharing Modal */}
+      {shareTarget && (
+        <ShareModal 
+          isOpen={Boolean(shareTarget)}
+          resource={shareTarget.item}
+          resourceType={shareTarget.type}
+          currentUser={session}
+          onClose={() => setShareTarget(null)}
+          onSaveShare={handleSaveShare}
+        />
+      )}
 
       {/* Toast Notification */}
       {toastMessage && (
