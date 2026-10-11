@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import DriveView from './components/DriveView';
@@ -19,7 +19,16 @@ import {
   TEAM_MEMBERS, 
   INITIAL_SPACES 
 } from './data/initialData';
-import { AWS_S3_CONFIG } from './services/storageService';
+import { 
+  AWS_S3_CONFIG, 
+  saveUserStateToCloud, 
+  loadUserStateFromCloud, 
+  getCleanUserId 
+} from './services/storageService';
+import { 
+  getActiveSession, 
+  logoutSession 
+} from './services/authService';
 
 import './App.css';
 
@@ -32,14 +41,13 @@ const FRESH_WELCOME_FILE = {
   status: 'indexed',
   folder: 'General',
   updatedAt: 'Just now',
-  author: 'Damien K.',
-  summary: 'Getting started guide for CogniDrive: AWS S3 storage, connecting custom AI models with API keys, and collaborative RAG spaces.',
-  content: `# Welcome to CogniDrive 🚀\n\nCogniDrive is your Google Drive for AI Chatbots, backed by **AWS S3** (\`${AWS_S3_CONFIG.bucket}\`).\n\n## Quick Start Guide\n1. **Upload Your Files**: Click **"+ New"** in the sidebar to upload Markdown, CSV, Code, or Text files. They are stored in your AWS S3 bucket and indexed for RAG.\n2. **Collaborative Chat Spaces**: Navigate to **#general-workspace** to chat with AI models grounded in your mounted documents.\n3. **Connect Your Own API Key**: Head to **AI Models** or click **"+ API Key"** in any chat space to plug in your OpenAI, Claude, or Gemini key for live responses.\n4. **1-Click Artifacts**: AI models can generate downloadable summaries, roadmaps, and plans that commit back to your Drive with 1 click.`,
-  tags: ['Welcome', 'Guide', 'AWS S3'],
+  author: 'CogniDrive Team',
+  summary: 'Getting started guide for CogniDrive: AWS cloud storage, connecting custom AI models with API keys, and collaborative RAG spaces.',
+  content: `# Welcome to CogniDrive 🚀\n\nCogniDrive is your Google Drive for AI Chatbots, backed by **Secure Cloud Storage**.\n\n## Quick Start Guide\n1. **Upload Your Files**: Click **"+ New"** in the sidebar to upload PDF, Word (.docx), CSV, Code, or Text files. They are parsed and indexed for real-time RAG.\n2. **Collaborative Chat Spaces**: Navigate to **#general-workspace** to chat with AI models grounded in your mounted documents.\n3. **Connect Your Own API Key**: Head to **AI Models** or click **"+ API Key"** in any chat space to plug in your OpenAI, Claude, or Gemini key for live responses.\n4. **1-Click Artifacts**: AI models can generate downloadable summaries, roadmaps, and plans that commit back to your Drive with 1 click.`,
+  tags: ['Welcome', 'Guide', 'Cloud Vault'],
   connectedSpaces: ['space-general'],
-  storageProvider: 'AWS S3',
-  s3Bucket: AWS_S3_CONFIG.bucket,
-  s3Uri: `s3://${AWS_S3_CONFIG.bucket}/users/damien-k/documents/welcome.md`
+  storageProvider: 'Cloud Storage',
+  s3Bucket: AWS_S3_CONFIG.bucket
 };
 
 const FRESH_FOLDERS = [
@@ -52,7 +60,7 @@ const FRESH_FOLDERS = [
 const FRESH_SPACE = {
   id: 'space-general',
   name: 'General Workspace',
-  description: 'Your primary collaborative space grounded in your AWS S3 documents.',
+  description: 'Your primary collaborative space grounded in your secure cloud documents.',
   activeBots: ['bot-gemini'],
   members: ['u-1'],
   connectedFileIds: ['f-welcome'],
@@ -65,75 +73,36 @@ const FRESH_SPACE = {
       avatar: '⚡',
       timestamp: 'Just now',
       reasoningTime: '0.4s',
-      content: `Welcome to your fresh CogniDrive workspace! 📂\n\nI am grounded in your initial file **Welcome_to_CogniDrive.md** stored in AWS S3. You can:\n- Upload your own files via **"+ New"**\n- Connect your custom model (OpenAI, Claude, Gemini) with your API key\n- Try asking me: *"Summarize the quick start guide in my mounted file"*\n\nLet's get started!`,
+      content: `Welcome to your fresh CogniDrive workspace! 📂\n\nI am grounded in your initial file **Welcome_to_CogniDrive.md** stored in your cloud vault. You can:\n- Upload your own files via **"+ New"**\n- Connect your custom model (OpenAI, Claude, Gemini) with your API key\n- Try asking me: *"Summarize the quick start guide in my mounted file"*\n\nLet's get started!`,
       citations: [
-        { fileId: 'f-welcome', fileName: 'Welcome_to_CogniDrive.md', excerpt: 'CogniDrive is your Google Drive for AI Chatbots, backed by AWS S3.' }
+        { fileId: 'f-welcome', fileName: 'Welcome_to_CogniDrive.md', excerpt: 'CogniDrive is your Google Drive for AI Chatbots, backed by Secure Cloud Storage.' }
       ]
     }
   ]
 };
 
 export default function App() {
-  // Session State (Null shows Landing Page)
-  const [session, setSession] = useState(() => {
-    const saved = localStorage.getItem('cognidrive_session');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return null; }
-    }
-    // Return null so user sees the new Landing Page and easy signup screen first!
-    return null;
-  });
+  // Session State (Cookies & LocalStorage auto sign-in)
+  const [session, setSession] = useState(() => getActiveSession());
 
-  const [files, setFiles] = useState(() => {
-    const savedMode = localStorage.getItem('cognidrive_mode');
-    return savedMode === 'fresh' ? [FRESH_WELCOME_FILE] : INITIAL_FILES;
-  });
+  // Workspace State per user (safe defaults while cloud state loads)
+  const [files, setFiles] = useState(() => INITIAL_FILES);
+  const [folders, setFolders] = useState(() => INITIAL_FOLDERS);
+  const [spaces, setSpaces] = useState(() => INITIAL_SPACES);
+  const [customModels, setCustomModels] = useState([]);
 
-  const [folders, setFolders] = useState(() => {
-    const savedMode = localStorage.getItem('cognidrive_mode');
-    return savedMode === 'fresh' ? FRESH_FOLDERS : INITIAL_FOLDERS;
-  });
-
-  const [spaces, setSpaces] = useState(() => {
-    const savedMode = localStorage.getItem('cognidrive_mode');
-    return savedMode === 'fresh' ? [FRESH_SPACE] : INITIAL_SPACES;
-  });
-
-  // Custom User Models with API Keys
-  const [customModels, setCustomModels] = useState(() => {
-    const saved = localStorage.getItem('cognidrive_custom_models');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
-    }
-    return [];
-  });
+  // Ref flag to ensure we only persist after active user state has loaded
+  const isLoadedRef = useRef(false);
 
   const [teamMembers] = useState(TEAM_MEMBERS);
-
   const [currentView, setCurrentView] = useState('drive'); // 'drive', 'space', 'agents'
-  const [selectedSpaceId, setSelectedSpaceId] = useState(() => {
-    const savedMode = localStorage.getItem('cognidrive_mode');
-    return savedMode === 'fresh' ? 'space-general' : 'space-1';
-  });
+  const [selectedSpaceId, setSelectedSpaceId] = useState('space-1');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Combined bots list (custom user models prepended to built-in models)
-  const allBots = [...customModels, ...AI_BOTS];
 
   // Dark Mode Theme State
   const [darkMode, setDarkMode] = useState(() => {
     return localStorage.getItem('cognidrive_theme') === 'dark';
   });
-
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      localStorage.setItem('cognidrive_theme', 'dark');
-    } else {
-      document.documentElement.setAttribute('data-theme', 'light');
-      localStorage.setItem('cognidrive_theme', 'light');
-    }
-  }, [darkMode]);
 
   // Modals
   const [previewFile, setPreviewFile] = useState(null);
@@ -149,60 +118,155 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // 1. Load active user workspace from S3 / LocalStorage on session switch or mount
+  useEffect(() => {
+    if (!session) return;
+    let isMounted = true;
+    isLoadedRef.current = false;
+
+    loadUserStateFromCloud(session).then((cloudState) => {
+      if (!isMounted) return;
+
+      if (cloudState && cloudState.files && cloudState.files.length > 0) {
+        setFiles(cloudState.files);
+        setFolders(cloudState.folders || INITIAL_FOLDERS);
+        setSpaces(cloudState.spaces || INITIAL_SPACES);
+        setCustomModels(cloudState.customModels || []);
+        if (cloudState.spaces?.length > 0) {
+          setSelectedSpaceId(cloudState.spaces[0].id);
+        }
+      } else {
+        // Initial setup for this user profile
+        const isDamienOrDemo = session.email?.toLowerCase().includes('damien') || session.mode === 'demo';
+
+        if (isDamienOrDemo) {
+          setFiles(INITIAL_FILES);
+          setFolders(INITIAL_FOLDERS);
+          setSpaces(INITIAL_SPACES);
+          setSelectedSpaceId('space-1');
+        } else {
+          const cleanName = session.name || 'User';
+          const userWelcomeDoc = {
+            ...FRESH_WELCOME_FILE,
+            id: `f-welcome-${session.id || Date.now()}`,
+            name: `Welcome_${cleanName.replace(/\s+/g, '_')}.md`,
+            author: cleanName,
+            userId: getCleanUserId(session),
+            content: `# Welcome to CogniDrive, ${cleanName}! 📂\n\nYour private workspace is provisioned with AWS cloud storage under \`users/${getCleanUserId(session)}/documents/\`.\n\n### Quick Start:\n1. Upload your own documents (PDF, Word .docx, CSV, Code, Images) via **+ New**\n2. Right-click anywhere on the canvas to create folders or documents\n3. Connect custom AI model API keys under **Account Settings**\n4. Ask the AI Co-Pilot questions grounded directly in your uploaded files!`
+          };
+          setFiles([userWelcomeDoc]);
+          setFolders(FRESH_FOLDERS);
+          setSpaces([FRESH_SPACE]);
+          setSelectedSpaceId('space-general');
+        }
+        setCustomModels([]);
+      }
+
+      isLoadedRef.current = true;
+    });
+
+    return () => { isMounted = false; };
+  }, [session?.email, session?.id]);
+
+  // 2. Persist state to AWS S3 & LocalStorage whenever user workspace changes
+  useEffect(() => {
+    if (!session || !isLoadedRef.current) return;
+
+    saveUserStateToCloud(session, {
+      files,
+      folders,
+      spaces,
+      customModels
+    });
+  }, [files, folders, spaces, customModels, session]);
+
+  // Combined bots list (custom user models prepended to built-in models)
+  const allBots = [...customModels, ...AI_BOTS];
+
+  // Dark Mode Theme Effect
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('cognidrive_theme', 'dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('cognidrive_theme', 'light');
+    }
+  }, [darkMode]);
+
   // Metrics
   const totalTokens = files.reduce((acc, f) => acc + (f.tokens || 0), 0);
-
-  // Active space object
   const currentSpace = spaces.find(s => s.id === selectedSpaceId) || spaces[0];
 
-  // Start new user session from Landing Page
-  const handleStartSession = ({ name, email, mode }) => {
-    const newSession = { name, email, mode, startedAt: Date.now() };
-    setSession(newSession);
-    localStorage.setItem('cognidrive_session', JSON.stringify(newSession));
-    localStorage.setItem('cognidrive_mode', mode);
-
-    if (mode === 'fresh') {
-      setFiles([FRESH_WELCOME_FILE]);
-      setFolders(FRESH_FOLDERS);
-      setSpaces([FRESH_SPACE]);
-      setSelectedSpaceId('space-general');
-      setCurrentView('drive');
-      showToast(`Welcome ${name}! Fresh workspace initialized on AWS S3.`);
-    } else {
-      setFiles(INITIAL_FILES);
-      setFolders(INITIAL_FOLDERS);
-      setSpaces(INITIAL_SPACES);
-      setSelectedSpaceId('space-1');
-      setCurrentView('drive');
-      showToast(`Welcome ${name}! Demo workspace loaded.`);
-    }
+  // Start session from Landing Page
+  const handleStartSession = (userSession) => {
+    setSession(userSession);
+    setCurrentView('drive');
+    showToast(`Welcome ${userSession.name}! Workspace active.`);
   };
 
-  // Sign out / Return to landing page
+  // Sign out
   const handleLogout = () => {
+    logoutSession();
     setSession(null);
-    localStorage.removeItem('cognidrive_session');
     showToast('Signed out of workspace.');
+  };
+
+  // Create Folder
+  const handleCreateFolder = (folderName) => {
+    if (!folderName.trim()) return;
+    const newFol = {
+      id: `fol-${Date.now()}`,
+      name: folderName.trim(),
+      color: '#1a73e8',
+      fileCount: 0
+    };
+    setFolders(prev => [...prev, newFol]);
+    showToast(`Folder "${folderName.trim()}" created!`);
+  };
+
+  // Delete Folder
+  const handleDeleteFolder = (folderName) => {
+    if (!window.confirm(`Delete folder "${folderName}" and all files in it?`)) return;
+    setFolders(prev => prev.filter(f => f.name !== folderName));
+    setFiles(prev => prev.filter(f => f.folder !== folderName));
+    showToast(`Folder "${folderName}" deleted.`);
+  };
+
+  // Create Blank Document
+  const handleCreateNewDocument = (folderName) => {
+    const timestamp = Date.now();
+    const docName = `Untitled_Notes_${Date.now().toString().slice(-4)}.md`;
+    const newDoc = {
+      id: `f-${timestamp}`,
+      userId: getCleanUserId(session),
+      name: docName,
+      type: 'markdown',
+      size: '1 KB',
+      tokens: 300,
+      status: 'indexed',
+      folder: folderName || folders[0]?.name || 'My Uploads',
+      updatedAt: 'Just now',
+      author: session?.name || 'You',
+      summary: 'New collaborative Markdown document ready for AI co-authoring.',
+      content: `# ${docName.replace('.md', '')}\n\nStart typing or collaborate with your AI model...`,
+      tags: ['Document', 'Notes'],
+      connectedSpaces: selectedSpaceId ? [selectedSpaceId] : []
+    };
+    setFiles(prev => [newDoc, ...prev]);
+    setPreviewFile(newDoc);
+    showToast(`Document "${docName}" created!`);
   };
 
   // Save new custom model
   const handleSaveModel = (newModel) => {
-    setCustomModels(prev => {
-      const updated = [newModel, ...prev];
-      localStorage.setItem('cognidrive_custom_models', JSON.stringify(updated));
-      return updated;
-    });
+    setCustomModels(prev => [newModel, ...prev]);
     showToast(`Model "${newModel.name}" connected with live API key!`);
   };
 
   // Delete custom model
   const handleDeleteCustomBot = (modelId) => {
-    setCustomModels(prev => {
-      const updated = prev.filter(m => m.id !== modelId);
-      localStorage.setItem('cognidrive_custom_models', JSON.stringify(updated));
-      return updated;
-    });
+    setCustomModels(prev => prev.filter(m => m.id !== modelId));
     showToast('Custom model removed.');
   };
 
@@ -275,6 +339,7 @@ export default function App() {
     const sp = spaces.find(s => s.id === spaceId);
     const newFile = {
       id: `f-art-${Date.now()}`,
+      userId: getCleanUserId(session),
       name: artifactData.title || `Synthesis_${Date.now().toString().slice(-4)}.md`,
       type: 'markdown',
       size: `${Math.round(Math.max(12, rawContent.length / 100))} KB`,
@@ -282,12 +347,12 @@ export default function App() {
       status: 'indexed',
       folder: 'Project Docs',
       updatedAt: 'Just now',
-      author: `${session?.name || 'Damien K.'} (via AI)`,
+      author: `${session?.name || 'You'} (via AI)`,
       summary: artifactData.preview || 'Grounded synthesis saved directly from collaborative chat space.',
       content: rawContent,
-      tags: ['AI Generated', 'Artifact', sp?.name.split(' ')[0] || 'Space', 'AWS S3'],
+      tags: ['AI Generated', 'Artifact', sp?.name.split(' ')[0] || 'Space', 'Cloud Vault'],
       connectedSpaces: [spaceId],
-      storageProvider: 'AWS S3',
+      storageProvider: 'Cloud Storage',
       s3Bucket: AWS_S3_CONFIG.bucket
     };
 
@@ -303,7 +368,7 @@ export default function App() {
       return s;
     }));
 
-    showToast(`"${newFile.name}" saved to AWS S3 Drive!`);
+    showToast(`"${newFile.name}" saved to your cloud drive!`);
   };
 
   // Upload file to Drive
@@ -323,7 +388,7 @@ export default function App() {
       }));
     }
 
-    showToast(`"${newFile.name}" uploaded to AWS S3 & indexed!`);
+    showToast(`"${newFile.name}" saved and synced to your cloud vault!`);
   };
 
   // Delete file
@@ -341,34 +406,41 @@ export default function App() {
   };
 
   // Create Space
-  const handleCreateSpace = (newSpace) => {
+  const handleCreateSpace = (newSpaceData) => {
+    const newSpace = {
+      id: `space-${Date.now()}`,
+      name: newSpaceData.name,
+      description: newSpaceData.description || 'Collaborative room grounded in workspace files.',
+      activeBots: newSpaceData.activeBots || ['bot-gemini'],
+      members: ['u-1', ...(newSpaceData.members || [])],
+      connectedFileIds: newSpaceData.connectedFileIds || [],
+      messages: [
+        {
+          id: `m-init-${Date.now()}`,
+          senderType: 'system',
+          author: 'System',
+          timestamp: 'Just now',
+          content: `Space created with ${newSpaceData.connectedFileIds?.length || 0} mounted files and ${newSpaceData.activeBots?.length || 1} AI agents ready to collaborate.`
+        }
+      ]
+    };
+
     setSpaces(prev => [...prev, newSpace]);
     setSelectedSpaceId(newSpace.id);
     setCurrentView('space');
-
-    if (newSpace.connectedFileIds?.length > 0) {
-      setFiles(prev => prev.map(f => {
-        if (newSpace.connectedFileIds.includes(f.id)) {
-          return {
-            ...f,
-            connectedSpaces: [...new Set([...(f.connectedSpaces || []), newSpace.id])]
-          };
-        }
-        return f;
-      }));
-    }
-
-    showToast(`Space #${newSpace.name} created!`);
+    showToast(`Space "#${newSpace.name}" launched!`);
   };
 
-  // Render Landing Page if no active session
+  // If user is not signed in, show modern Landing View
   if (!session) {
-    return <LandingView onStartSession={handleStartSession} />;
+    return (
+      <LandingView onStartSession={handleStartSession} />
+    );
   }
 
   return (
-    <div className="cogni-app-root">
-      {/* Top Navigation */}
+    <div className="cognidrive-app-root">
+      {/* Universal Top Navigation */}
       <Navbar 
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -379,33 +451,41 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Main App Layout */}
-      <div className="cogni-body-layout">
+      <div className="app-main-layout">
+        {/* Google Drive / Slack Unified Sidebar */}
         <Sidebar 
           currentView={currentView}
           setCurrentView={setCurrentView}
+          spaces={spaces}
           selectedSpaceId={selectedSpaceId}
           setSelectedSpaceId={setSelectedSpaceId}
-          spaces={spaces}
-          files={files}
-          bots={allBots}
-          onOpenNewSpace={() => setIsNewSpaceModalOpen(true)}
-          onOpenUpload={() => setIsUploadModalOpen(true)}
+          onOpenUploadModal={() => setIsUploadModalOpen(true)}
+          onOpenNewSpaceModal={() => setIsNewSpaceModalOpen(true)}
+          onOpenAddModelModal={() => setIsAddModelModalOpen(true)}
+          files={files || []}
+          filesCount={(files || []).length}
+          totalTokens={totalTokens}
+          user={session}
         />
 
-        <main className="cogni-main-content">
+        {/* Dynamic Center Workspaces */}
+        <main className="workspace-content-pane">
           {currentView === 'drive' && (
             <DriveView 
               files={files}
               folders={folders}
-              spaces={spaces}
-              onOpenFile={(file) => setPreviewFile(file)}
-              onConnectFileToSpace={(file) => {
-                setConnectModalSpaceId(selectedSpaceId);
-              }}
-              onDeleteFile={handleDeleteFile}
-              onOpenUpload={() => setIsUploadModalOpen(true)}
               searchQuery={searchQuery}
+              onOpenFile={(file) => setPreviewFile(file)}
+              onDeleteFile={handleDeleteFile}
+              onUploadClick={() => setIsUploadModalOpen(true)}
+              onMountToSpace={(file) => {
+                if (currentSpace) {
+                  handleSaveConnections(currentSpace.id, [...new Set([...(currentSpace.connectedFileIds || []), file.id])]);
+                }
+              }}
+              onCreateFolder={handleCreateFolder}
+              onDeleteFolder={handleDeleteFolder}
+              onCreateNewDocument={handleCreateNewDocument}
             />
           )}
 
@@ -415,13 +495,11 @@ export default function App() {
               allFiles={files}
               allBots={allBots}
               teamMembers={teamMembers}
-              onSendMessage={handleSendMessage}
-              onMountFiles={handleSaveConnections}
-              onUnmountFile={handleUnmountFile}
-              onToggleFileContext={() => {}}
+              onSendMessage={(msg) => handleSendMessage(currentSpace.id, msg)}
+              onOpenConnectModal={(spaceId) => setConnectModalSpaceId(spaceId)}
               onOpenFile={(file) => setPreviewFile(file)}
-              onSaveArtifactToDrive={handleSaveArtifactToDrive}
-              onOpenConnectModal={() => setConnectModalSpaceId(currentSpace.id)}
+              onUnmountFile={(fileId) => handleUnmountFile(currentSpace.id, fileId)}
+              onSaveArtifact={(artifact, content) => handleSaveArtifactToDrive(currentSpace.id, artifact, content)}
               onOpenAddModel={() => setIsAddModelModalOpen(true)}
             />
           )}
@@ -429,7 +507,8 @@ export default function App() {
           {currentView === 'agents' && (
             <AgentsView 
               bots={allBots}
-              spaces={spaces}
+              filesCount={files.length}
+              spacesCount={spaces.length}
               onOpenAddModel={() => setIsAddModelModalOpen(true)}
               onDeleteCustomBot={handleDeleteCustomBot}
             />
@@ -437,31 +516,35 @@ export default function App() {
         </main>
       </div>
 
-      {/* Modals */}
+      {/* Global High-Fidelity File Preview / Document Viewer */}
       {previewFile && (
         <FilePreviewModal 
           file={previewFile}
           spaces={spaces}
           onClose={() => setPreviewFile(null)}
           onMountToSpace={(file) => {
-            setConnectModalSpaceId(selectedSpaceId);
+            if (currentSpace) {
+              handleSaveConnections(currentSpace.id, [...new Set([...(currentSpace.connectedFileIds || []), file.id])]);
+            }
           }}
-          onNavigateToSpace={(spaceId) => {
-            setSelectedSpaceId(spaceId);
-            setCurrentView('space');
-          }}
+          allBots={allBots}
         />
       )}
 
+      {/* Mount / Connect Files to Space Modal */}
       {connectModalSpaceId && (
         <ConnectFilesModal 
-          space={spaces.find(s => s.id === connectModalSpaceId) || currentSpace}
+          space={spaces.find(s => s.id === connectModalSpaceId)}
           allFiles={files}
           onClose={() => setConnectModalSpaceId(null)}
-          onSaveConnections={handleSaveConnections}
+          onSave={(fileIds) => {
+            handleSaveConnections(connectModalSpaceId, fileIds);
+            setConnectModalSpaceId(null);
+          }}
         />
       )}
 
+      {/* Create New Space Modal */}
       {isNewSpaceModalOpen && (
         <NewSpaceModal 
           allFiles={files}
@@ -472,18 +555,20 @@ export default function App() {
         />
       )}
 
+      {/* Upload File to Drive Modal */}
       {isUploadModalOpen && (
         <UploadFileModal 
           folders={folders}
           spaces={spaces}
           currentSpaceId={currentView === 'space' ? selectedSpaceId : null}
+          user={session}
           onClose={() => setIsUploadModalOpen(false)}
           onUploadFile={handleUploadFile}
         />
       )}
 
       {/* Connect Custom Model / API Key Modal */}
-      <AddModelModal
+      <AddModelModal 
         isOpen={isAddModelModalOpen}
         onClose={() => setIsAddModelModalOpen(false)}
         onSaveModel={handleSaveModel}

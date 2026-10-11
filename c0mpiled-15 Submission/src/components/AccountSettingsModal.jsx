@@ -9,12 +9,11 @@ import {
   Cpu, 
   User, 
   Sparkles, 
-  Sliders,
-  Cloud,
-  LogOut,
+  Cloud, 
+  LogOut, 
   Key
 } from 'lucide-react';
-import { AWS_S3_CONFIG } from '../services/storageService';
+import { getCleanUserId } from '../services/storageService';
 
 export default function AccountSettingsModal({
   isOpen,
@@ -29,9 +28,11 @@ export default function AccountSettingsModal({
 }) {
   if (!isOpen) return null;
 
-  const userName = user?.name || 'Damien K.';
-  const userEmail = user?.email || 'damien@cognidrive.local';
-  const initials = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'DK';
+  const userName = user?.name || 'Workspace User';
+  const userEmail = user?.email || 'user@cognidrive.local';
+  const userRole = user?.role || 'Owner';
+  const cleanId = getCleanUserId(user);
+  const initials = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -41,8 +42,8 @@ export default function AccountSettingsModal({
           <div className="settings-title-wrap">
             <User size={20} className="text-indigo" />
             <div>
-              <h2 className="settings-modal-title">Account Settings</h2>
-              <div className="settings-modal-subtitle">Manage preferences, appearance, and AWS cloud storage</div>
+              <h2 className="settings-modal-title">Account & Workspace Settings</h2>
+              <div className="settings-modal-subtitle">Manage preferences, appearance, and cloud storage</div>
             </div>
           </div>
           <button className="modal-close-btn" onClick={onClose} title="Close">
@@ -58,17 +59,23 @@ export default function AccountSettingsModal({
             <div className="profile-card-info">
               <div className="profile-card-name">{userName}</div>
               <div className="profile-card-email">{userEmail}</div>
-              <span className="profile-card-badge">Workspace Owner • AWS S3 Backed</span>
+              <div className="profile-meta-badges-row">
+                <span className="profile-card-badge">{userRole}</span>
+                <span className="profile-verified-badge">
+                  <ShieldCheck size={12} className="text-green" />
+                  <span>Email Verified • Cloud Vault Active</span>
+                </span>
+              </div>
             </div>
             {onLogout && (
               <button 
                 type="button" 
                 className="btn-settings-logout" 
                 onClick={() => { onClose(); onLogout(); }}
-                title="Switch user session or return to landing page"
+                title="Sign out of this account"
               >
                 <LogOut size={14} />
-                <span>Switch Session</span>
+                <span>Sign Out</span>
               </button>
             )}
           </div>
@@ -147,23 +154,23 @@ export default function AccountSettingsModal({
             </div>
           </div>
 
-          {/* AWS Cloud & Storage Status */}
+          {/* Cloud Storage Status */}
           <div className="settings-section">
             <div className="section-title-row">
-              <h3 className="settings-section-title">AWS S3 Storage & Backend</h3>
+              <h3 className="settings-section-title">Private Cloud Storage</h3>
               <span className="section-current-pill text-green">
                 <Cloud size={13} />
-                <span>Active</span>
+                <span>Connected & Synced</span>
               </span>
             </div>
             <div className="aws-bucket-info-banner">
               <div className="bucket-meta-row">
-                <span className="bucket-label">Storage Bucket:</span>
-                <code className="bucket-val">{AWS_S3_CONFIG.bucket}</code>
+                <span className="bucket-label">User Storage Prefix:</span>
+                <code className="bucket-val">users/{cleanId}/documents/</code>
               </div>
               <div className="bucket-meta-row">
-                <span className="bucket-label">AWS Region:</span>
-                <span className="bucket-val">{AWS_S3_CONFIG.region}</span>
+                <span className="bucket-label">Cloud Sync:</span>
+                <span className="bucket-val font-semibold text-indigo">Active Cloud Isolation</span>
               </div>
               <div className="bucket-meta-row">
                 <span className="bucket-label">Security & Privacy:</span>
@@ -175,7 +182,7 @@ export default function AccountSettingsModal({
               <div className="settings-stat-card">
                 <div className="stat-label">
                   <HardDrive size={14} className="text-muted" />
-                  <span>Indexed Documents</span>
+                  <span>Profile Documents</span>
                 </div>
                 <div className="stat-value">{filesCount} files</div>
               </div>
@@ -201,7 +208,7 @@ export default function AccountSettingsModal({
                   <ShieldCheck size={14} className="text-muted" />
                   <span>Data Protection</span>
                 </div>
-                <div className="stat-value text-green">AWS Encrypted</div>
+                <div className="stat-value text-green">AES-256 Encrypted</div>
               </div>
             </div>
           </div>

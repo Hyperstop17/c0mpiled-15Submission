@@ -3,84 +3,109 @@ import {
   X, 
   Upload, 
   Folder, 
-  Sparkles, 
   Check, 
   FileText, 
-  Layers,
-  Cloud,
-  FileUp
+  FileUp, 
+  Loader2, 
+  FileSpreadsheet, 
+  FileCode, 
+  Image as ImageIcon 
 } from 'lucide-react';
-import { AWS_S3_CONFIG, detectFileType } from '../services/storageService';
+import { uploadFileToStorage } from '../services/storageService';
+import { parseUploadedFile } from '../services/fileParser';
 
 export default function UploadFileModal({
   folders,
   spaces,
   currentSpaceId,
+  user,
   onClose,
   onUploadFile
 }) {
   const [fileName, setFileName] = useState('');
   const [folder, setFolder] = useState(folders[0]?.name || 'My Uploads');
   const [content, setContent] = useState('');
+  const [dataUrl, setDataUrl] = useState('');
+  const [htmlContent, setHtmlContent] = useState('');
+  const [detectedType, setDetectedType] = useState('text');
+  const [fileSize, setFileSize] = useState('');
   const [summary, setSummary] = useState('');
   const [mountToCurrent, setMountToCurrent] = useState(true);
-  const [isReadingLocalFile, setIsReadingLocalFile] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
-  // Handle uploading real file from local computer
-  const handleLocalFileChange = (e) => {
-    const file = e.target.files?.[0];
+  const processSelectedFile = async (file) => {
     if (!file) return;
 
     setFileName(file.name);
-    setIsReadingLocalFile(true);
+    setIsParsing(true);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result || '';
-      setContent(text);
+    try {
+      const parsed = await parseUploadedFile(file);
+      setContent(parsed.content || '');
+      setDataUrl(parsed.dataUrl || '');
+      setHtmlContent(parsed.htmlContent || '');
+      setDetectedType(parsed.type);
+      setFileSize(parsed.size);
       if (!summary) {
-        setSummary(`Uploaded from ${file.name} (${Math.round(file.size / 1024)} KB). Ready for RAG grounding.`);
+        setSummary(parsed.summary || `Uploaded ${parsed.name} (${parsed.size}). Ready for AI grounding.`);
       }
-      setIsReadingLocalFile(false);
-    };
-    reader.onerror = () => {
-      setIsReadingLocalFile(false);
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      console.error('File parsing error:', err);
+    } finally {
+      setIsParsing(false);
+    }
   };
 
-  const handleSubmit = (e) => {
+  const handleLocalFileChange = (e) => {
+    const file = e.target.files?.[0];
+    processSelectedFile(file);
+  };
+
+  const handleDrop = (e) => {
     e.preventDefault();
-    if (!fileName.trim()) return;
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    processSelectedFile(file);
+  };
 
-    const type = detectFileType(fileName);
-    const words = (content || fileName).split(/\s+/).length;
-    const estimatedTokens = Math.max(850, Math.round(words * 1.3));
-    const timestamp = Date.now();
-    const s3Key = `users/damien-k/documents/${timestamp}_${fileName.trim().replace(/\s+/g, '_')}`;
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
 
-    const newFile = {
-      id: `f-${timestamp}`,
-      name: fileName.trim(),
-      type: type,
-      size: `${Math.round(Math.max(12, (content.length || 1024) / 1024))} KB`,
-      tokens: estimatedTokens,
-      status: 'indexed',
-      folder: folder,
-      updatedAt: 'Just now',
-      author: 'Damien K. (You)',
-      summary: summary.trim() || `Uploaded document containing ${words} words. Semantic vector index generated in AWS S3.`,
-      content: content.trim() || `# ${fileName}\n\nUploaded file content indexed for CogniDrive collaborative spaces.`,
-      tags: ['AWS S3', 'Uploaded', folder.split(' ')[0]],
-      connectedSpaces: mountToCurrent && currentSpaceId ? [currentSpaceId] : [],
-      storageProvider: 'AWS S3',
-      s3Bucket: AWS_S3_CONFIG.bucket,
-      s3Key: s3Key,
-      s3Uri: `s3://${AWS_S3_CONFIG.bucket}/${s3Key}`
-    };
+  const handleDragLeave = () => {
+    setDragOver(false);
+  };
 
-    onUploadFile(newFile);
-    onClose();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!fileName.trim() || isUploading || isParsing) return;
+
+    setIsUploading(true);
+
+    try {
+      const savedFile = await uploadFileToStorage({
+        name: fileName.trim(),
+        content: content.trim() || `# ${fileName.trim()}\n\nUploaded file content.`,
+        dataUrl: dataUrl || undefined,
+        htmlContent: htmlContent || undefined,
+        type: detectedType,
+        size: fileSize || '24 KB',
+        folder: folder,
+        summary: summary.trim(),
+        author: user?.name ? `${user.name} (You)` : 'You',
+        connectedSpaces: mountToCurrent && currentSpaceId ? [currentSpaceId] : []
+      }, user);
+
+      onUploadFile(savedFile);
+      onClose();
+    } catch (err) {
+      console.error('Failed to upload file:', err);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -90,9 +115,9 @@ export default function UploadFileModal({
           <div className="modal-title-wrap">
             <Upload size={20} className="text-cyan" />
             <div>
-              <h2 className="modal-title">Upload Document to AI Drive</h2>
+              <h2 className="modal-title">Upload File to AI Drive</h2>
               <div className="modal-subtitle">
-                Backed by <strong>AWS S3</strong> ({AWS_S3_CONFIG.bucket}) with automatic vector chunking for RAG.
+                Secure Cloud Storage • All formats (PDF, Word, Spreadsheets, Code, Images) rendered natively
               </div>
             </div>
           </div>
@@ -102,29 +127,40 @@ export default function UploadFileModal({
         </div>
 
         <form onSubmit={handleSubmit} className="modal-form-content">
-          {/* Local File Picker Dropzone */}
-          <div className="file-dropzone-box">
-            <FileUp size={24} className="text-indigo" />
-            <div>
+          {/* Universal Dropzone Box */}
+          <div 
+            className={`file-dropzone-box ${dragOver ? 'drag-over' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            {isParsing ? (
+              <Loader2 size={28} className="text-indigo spinner" />
+            ) : (
+              <FileUp size={28} className="text-indigo" />
+            )}
+            <div className="dropzone-text-group">
               <label htmlFor="file-input-upload" className="dropzone-label">
-                Choose a local file from your computer
+                {isParsing ? 'Parsing and indexing document...' : fileName ? `Selected: ${fileName}` : 'Choose or drop any file from your computer'}
               </label>
-              <div className="dropzone-sub">Supports Markdown (.md), CSV, Code (.py, .js, .json), PDF, and Text</div>
+              <div className="dropzone-sub">
+                Supports PDFs, Word (.docx), Spreadsheets (.csv), Code, Markdown, Text, and Images
+              </div>
             </div>
             <input 
               id="file-input-upload" 
               type="file" 
               className="dropzone-file-input"
               onChange={handleLocalFileChange} 
-              accept=".txt,.md,.csv,.json,.py,.js,.jsx,.ts,.tsx,.html,.css"
+              accept="*/*"
             />
           </div>
 
           <div className="form-group">
-            <label>File Name (with extension)</label>
+            <label>File Name</label>
             <input 
               type="text" 
-              placeholder="e.g. Product_Roadmap_2026.md, API_Spec.json, Data.csv" 
+              placeholder="e.g. Sales_Report.csv, Contract.pdf, Specs.docx, script.py" 
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
               required
@@ -132,7 +168,7 @@ export default function UploadFileModal({
           </div>
 
           <div className="form-group">
-            <label>Target Drive Folder</label>
+            <label>Destination Folder</label>
             <select 
               value={folder}
               onChange={(e) => setFolder(e.target.value)}
@@ -146,24 +182,27 @@ export default function UploadFileModal({
           </div>
 
           <div className="form-group">
-            <label>Quick Summary or Topic (Optional)</label>
+            <label>Summary / Topic Note (Optional)</label>
             <input 
               type="text" 
-              placeholder="Brief summary for instant RAG routing..." 
+              placeholder="Short note or description for AI retrieval..." 
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
             />
           </div>
 
-          <div className="form-group">
-            <label>File Content / Text</label>
-            <textarea 
-              rows={5}
-              placeholder="Paste document text, Markdown, CSV data, or code here, or choose a file above..." 
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-            />
-          </div>
+          {/* Show Content Preview textarea only for text/code/markdown */}
+          {detectedType !== 'image' && (
+            <div className="form-group">
+              <label>Document Content Preview</label>
+              <textarea 
+                rows={4}
+                placeholder="File text, extracted content, or paste data directly here..." 
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+              />
+            </div>
+          )}
 
           {currentSpaceId && (
             <div className="checkbox-row" onClick={() => setMountToCurrent(!mountToCurrent)}>
@@ -171,18 +210,31 @@ export default function UploadFileModal({
                 {mountToCurrent && <Check size={12} />}
               </div>
               <span className="checkbox-label">
-                Mount directly to current active space (makes immediately accessible to AI bots)
+                Mount directly to current active room (makes immediately available for AI questions)
               </span>
             </div>
           )}
 
           <div className="modal-footer">
-            <button type="button" className="btn-secondary" onClick={onClose}>
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={isUploading}>
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={!fileName.trim() || isReadingLocalFile}>
-              <Cloud size={15} />
-              <span>Upload to AWS S3 & Index</span>
+            <button 
+              type="submit" 
+              className="btn-primary" 
+              disabled={!fileName.trim() || isParsing || isUploading}
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 size={15} className="spinner" />
+                  <span>Saving to Cloud...</span>
+                </>
+              ) : (
+                <>
+                  <Upload size={15} />
+                  <span>Save to Drive</span>
+                </>
+              )}
             </button>
           </div>
         </form>

@@ -154,6 +154,103 @@ class SyntheticTrajectoryGenerator:
 `,
     tags: ['Python', 'Code', 'Synthetic Data'],
     connectedSpaces: ['space-2'],
+  },
+  {
+    id: 'f-7',
+    name: 'database_schema.sql',
+    type: 'code',
+    size: '85 KB',
+    tokens: 2200,
+    status: 'indexed',
+    folder: 'Engineering & AI',
+    updatedAt: '2026-10-11 12:40',
+    author: 'Damien K.',
+    summary: 'PostgreSQL relational schemas for workspace collaborative spaces, file mounts, message traces, and vector indexes.',
+    content: `-- CogniDrive Core Persistence Layer
+CREATE TABLE workspaces (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    owner_email VARCHAR(255) NOT NULL,
+    aws_s3_bucket VARCHAR(255) DEFAULT 'cognidrive-storage-450690783766',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
+    file_name VARCHAR(255) NOT NULL,
+    s3_key VARCHAR(1024) NOT NULL,
+    file_type VARCHAR(50) NOT NULL,
+    file_size_bytes BIGINT NOT NULL,
+    token_count INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE space_document_mounts (
+    space_id UUID NOT NULL,
+    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
+    mounted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (space_id, document_id)
+);`,
+    tags: ['SQL', 'Database', 'Schema'],
+    connectedSpaces: ['space-2']
+  },
+  {
+    id: 'f-8',
+    name: 'agent_eval_matrix.json',
+    type: 'code',
+    size: '42 KB',
+    tokens: 1540,
+    status: 'indexed',
+    folder: 'Engineering & AI',
+    updatedAt: '2026-10-11 15:10',
+    author: 'Damien K.',
+    summary: 'Automated benchmark evaluation metrics comparing Gemini 2.5 Flash, Claude 3.7 Sonnet, and GPT-4o on RAG retrieval accuracy.',
+    content: `{
+  "benchmark_version": "2026.3-alpha",
+  "evaluated_at": "2026-10-11T19:00:00Z",
+  "storage_backend": "AWS S3 us-east-1",
+  "models": [
+    {
+      "id": "gemini-2.5-flash",
+      "grounding_faithfulness": 0.982,
+      "context_recall": 0.965,
+      "latency_p50_ms": 780,
+      "max_context_window": 1000000
+    },
+    {
+      "id": "claude-3-7-sonnet",
+      "grounding_faithfulness": 0.988,
+      "context_recall": 0.971,
+      "latency_p50_ms": 1120,
+      "max_context_window": 200000
+    },
+    {
+      "id": "gpt-4o-mini",
+      "grounding_faithfulness": 0.974,
+      "context_recall": 0.952,
+      "latency_p50_ms": 650,
+      "max_context_window": 128000
+    }
+  ]
+}`,
+    tags: ['JSON', 'Benchmark', 'Evaluation'],
+    connectedSpaces: ['space-1', 'space-2']
+  },
+  {
+    id: 'f-9',
+    name: 'System_Architecture_Diagram.svg',
+    type: 'image',
+    size: '64 KB',
+    tokens: 1200,
+    status: 'indexed',
+    folder: 'Engineering & AI',
+    updatedAt: '2026-10-11 16:00',
+    author: 'Damien K.',
+    summary: 'Vector architecture diagram depicting AWS S3 document ingestion, embedding indexing, and multi-model collaboration rooms.',
+    dataUrl: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 400' width='800' height='400'><rect width='800' height='400' rx='16' fill='%23131314'/><text x='400' y='60' text-anchor='middle' fill='%23e3e3e3' font-family='sans-serif' font-size='22' font-weight='bold'>CogniDrive Unified Architecture (AWS S3)</text><rect x='60' y='120' width='180' height='200' rx='12' fill='%231e1f20' stroke='%234285f4' stroke-width='2'/><text x='150' y='160' text-anchor='middle' fill='%234285f4' font-family='sans-serif' font-size='16' font-weight='bold'>AWS S3</text><text x='150' y='190' text-anchor='middle' fill='%239aa0a6' font-family='sans-serif' font-size='12'>Document Storage</text><text x='150' y='220' text-anchor='middle' fill='%239aa0a6' font-family='sans-serif' font-size='12'>Bucket: cognidrive</text><text x='150' y='250' text-anchor='middle' fill='%2334a853' font-family='sans-serif' font-size='12'>Zero-Training Enforced</text><path d='M250 220 L310 220' stroke='%234285f4' stroke-width='3' marker-end='url(%23arrow)'/><rect x='320' y='120' width='180' height='200' rx='12' fill='%231e1f20' stroke='%23ea8600' stroke-width='2'/><text x='410' y='160' text-anchor='middle' fill='%23ea8600' font-family='sans-serif' font-size='16' font-weight='bold'>RAG Engine</text><text x='410' y='190' text-anchor='middle' fill='%239aa0a6' font-family='sans-serif' font-size='12'>Sliding Context</text><text x='410' y='220' text-anchor='middle' fill='%239aa0a6' font-family='sans-serif' font-size='12'>Token Budgeting</text><text x='410' y='250' text-anchor='middle' fill='%23ea8600' font-family='sans-serif' font-size='12'>Dynamic Mounting</text><path d='M510 220 L570 220' stroke='%23ea8600' stroke-width='3'/><rect x='580' y='120' width='180' height='200' rx='12' fill='%231e1f20' stroke='%2334a853' stroke-width='2'/><text x='670' y='160' text-anchor='middle' fill='%2334a853' font-family='sans-serif' font-size='16' font-weight='bold'>AI Spaces</text><text x='670' y='190' text-anchor='middle' fill='%239aa0a6' font-family='sans-serif' font-size='12'>OpenAI • Claude</text><text x='670' y='220' text-anchor='middle' fill='%239aa0a6' font-family='sans-serif' font-size='12'>Gemini • Custom</text><text x='670' y='250' text-anchor='middle' fill='%2334a853' font-family='sans-serif' font-size='12'>Live Inference</text></svg>",
+    tags: ['Architecture', 'SVG', 'Diagram'],
+    connectedSpaces: ['space-1']
   }
 ];
 

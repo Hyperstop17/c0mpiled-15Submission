@@ -20,14 +20,23 @@ export default function Sidebar({
   setCurrentView,
   selectedSpaceId,
   setSelectedSpaceId,
-  spaces,
-  files,
-  bots,
+  spaces = [],
+  files = [],
+  filesCount = 0,
+  totalTokens = 0,
+  bots = [],
+  user,
   onOpenNewSpace,
-  onOpenUpload
+  onOpenUpload,
+  onOpenNewSpaceModal,
+  onOpenUploadModal,
+  onOpenAddModelModal
 }) {
   const [showNewMenu, setShowNewMenu] = useState(false);
   const [spacesOpen, setSpacesOpen] = useState(true);
+
+  const handleUpload = onOpenUpload || onOpenUploadModal;
+  const handleNewSpace = onOpenNewSpace || onOpenNewSpaceModal;
 
   return (
     <aside className="sidebar-container">
@@ -43,13 +52,13 @@ export default function Sidebar({
 
         {showNewMenu && (
           <div className="new-dropdown-menu" onClick={() => setShowNewMenu(false)}>
-            <button className="dropdown-item" onClick={onOpenUpload}>
+            <button className="dropdown-item" onClick={handleUpload}>
               <Upload size={18} className="text-muted" />
               <div>
                 <strong>File upload</strong>
               </div>
             </button>
-            <button className="dropdown-item" onClick={onOpenNewSpace}>
+            <button className="dropdown-item" onClick={handleNewSpace}>
               <MessageSquare size={18} className="text-muted" />
               <div>
                 <strong>New chat space</strong>
@@ -161,7 +170,7 @@ export default function Sidebar({
           <div className="storage-progress-bar" style={{ width: '8%' }}></div>
         </div>
         <div className="storage-caption">
-          {files.length} files • 76.5k RAG tokens
+          {(files?.length ?? filesCount ?? 0)} files • {totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}k tokens` : `${(files?.length || 0) * 1.5}k tokens`}
         </div>
       </div>
     </aside>
